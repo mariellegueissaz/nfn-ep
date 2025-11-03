@@ -1,6 +1,34 @@
 // Vercel Serverless Function to proxy Airtable API calls
 // The API key is stored server-side only (Vercel env vars, not VITE_)
 
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+// Load .env.local manually if in development and env vars not set
+function loadLocalEnv() {
+  try {
+    if (typeof process.env.AIRTABLE_API_KEY === 'undefined') {
+      const envPath = join(process.cwd(), '.env.local');
+      const envContent = readFileSync(envPath, 'utf8');
+      envContent.split('\n').forEach(line => {
+        const match = line.match(/^([^#][^=]+)=(.*)$/);
+        if (match) {
+          const key = match[1].trim();
+          const value = match[2].trim();
+          if (!process.env[key]) {
+            process.env[key] = value;
+          }
+        }
+      });
+    }
+  } catch (e) {
+    // .env.local might not exist, that's ok
+  }
+}
+
+// Load env on module load
+loadLocalEnv();
+
 export default async function handler(req, res) {
   // Only allow POST requests
   if (req.method !== 'POST') {
@@ -16,8 +44,18 @@ export default async function handler(req, res) {
   const AIRTABLE_API_KEY = process.env.AIRTABLE_API_KEY;
   const DEFAULT_BASE_ID = process.env.AIRTABLE_BASE_ID;
 
+  // Debug: log available env vars (remove in production)
+  console.log('Environment check:', {
+    hasApiKey: !!AIRTABLE_API_KEY,
+    hasBaseId: !!DEFAULT_BASE_ID,
+    envKeys: Object.keys(process.env).filter(k => k.includes('AIRTABLE'))
+  });
+
   if (!AIRTABLE_API_KEY) {
-    return res.status(500).json({ error: 'Server configuration missing: AIRTABLE_API_KEY' });
+    return res.status(500).json({ 
+      error: 'Server configuration missing: AIRTABLE_API_KEY',
+      hint: 'Make sure AIRTABLE_API_KEY is in .env.local file in the selfhosted/ directory'
+    });
   }
 
   try {

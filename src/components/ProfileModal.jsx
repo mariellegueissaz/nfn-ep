@@ -44,9 +44,9 @@ export default function ProfileModal({open, onClose, promoter, contacts = [], ma
     const setField = (key, val) => setValues(prev => ({...prev, [key]: val}));
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40" onClick={onClose}></div>
-            <div className="relative w-full max-w-2xl bg-white dark:bg-gray-gray700 rounded-lg shadow-xl p-6">
+            <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-gray700 rounded-lg shadow-xl p-6">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-xl font-semibold text-gray-gray800 dark:text-gray-gray100">Your Company</h2>
                     <button onClick={onClose} className="text-gray-gray500 hover:text-gray-gray700 dark:text-gray-gray300 dark:hover:text-gray-gray100">✕</button>
@@ -146,13 +146,15 @@ function ContactCard({contact, mappings, onSaveContact}) {
                 <FieldRow label="Mobile" value={local[mappings.contactMobileField]} editable={editing} onChange={(v) => setField(mappings.contactMobileField, v)} />
                 <div>
                     <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Authorized to sign</label>
-                    {editing ? (
-                        <input type="checkbox" checked={!!local[mappings.contactAuthorizedField]} onChange={(e) => setField(mappings.contactAuthorizedField, e.target.checked)} />
-                    ) : (
-                        <div className="px-3 py-2 bg-gray-gray50 dark:bg-gray-gray800 rounded-md text-gray-gray800 dark:text-gray-gray100 border border-gray-gray200 dark:border-gray-gray600">
-                            {contact.fields?.[mappings.contactAuthorizedField] ? 'Yes' : 'No'}
-                        </div>
-                    )}
+                    <div className="px-3 py-2">
+                        <input 
+                            type="checkbox" 
+                            checked={!!local[mappings.contactAuthorizedField]} 
+                            onChange={(e) => setField(mappings.contactAuthorizedField, e.target.checked)} 
+                            disabled={!editing}
+                            className={!editing ? 'opacity-50 cursor-not-allowed' : ''}
+                        />
+                    </div>
                 </div>
             </div>
         </li>

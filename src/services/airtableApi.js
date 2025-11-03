@@ -15,16 +15,21 @@ class AirtableApiService {
             body: JSON.stringify({ path, method, body, queryParams })
         });
         if (!response.ok) {
+            const errorText = await response.text();
             let errorData;
             try {
-                errorData = await response.json();
+                errorData = JSON.parse(errorText);
             } catch {
-                const errorText = await response.text();
                 errorData = { error: errorText };
             }
             throw new Error(`Airtable API error ${response.status}: ${JSON.stringify(errorData)}`);
         }
-        return response.json();
+        const text = await response.text();
+        try {
+            return JSON.parse(text);
+        } catch {
+            throw new Error(`Invalid JSON response: ${text}`);
+        }
     }
 
     async getRecords(tableName, options = {}) {
