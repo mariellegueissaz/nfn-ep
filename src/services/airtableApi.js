@@ -7,11 +7,31 @@ const getEnv = (key, fallback = '') => {
 
 const AIRTABLE_BASE_ID = getEnv('VITE_AIRTABLE_BASE_ID');
 
+// Get Firebase auth token
+async function getAuthToken() {
+    try {
+        const { getAuth } = await import('firebase/auth');
+        const auth = getAuth();
+        if (auth.currentUser) {
+            return await auth.currentUser.getIdToken();
+        }
+    } catch (e) {
+        console.error('Failed to get auth token:', e);
+    }
+    return null;
+}
+
 class AirtableApiService {
     async callProxy(path, method = 'GET', body = null, queryParams = {}) {
+        const token = await getAuthToken();
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+        
         const response = await fetch(PROXY_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ path, method, body, queryParams })
         });
         if (!response.ok) {

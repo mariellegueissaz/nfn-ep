@@ -1,8 +1,10 @@
 // Vercel Serverless Function to proxy Airtable API calls
-// The API key is stored server-side only (Vercel env vars, not VITE_)
+// SECURITY: Whitelist-based access control, Firebase auth verification, input validation
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 
 // Load .env.local manually if in development and env vars not set
 function loadLocalEnv() {
@@ -26,54 +28,190 @@ function loadLocalEnv() {
   }
 }
 
-// Load env on module load
 loadLocalEnv();
 
+// Initialize Firebase Admin (for token verification)
+let firebaseAdminInitialized = false;
+function initFirebaseAdmin() {
+  if (firebaseAdminInitialized) return;
+  
+  try {
+    const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (serviceAccount) {
+      const serviceAccountJson = JSON.parse(serviceAccount);
+      if (!getApps().length) {
+        initializeApp({
+          credential: cert(serviceAccountJson)
+        });
+      }
+      firebaseAdminInitialized = true;
+    }
+  } catch (e) {
+    console.error('Firebase Admin init error:', e.message);
+  }
+}
+
+// Whitelist of allowed bases and tables (SECURITY: prevents table name guessing)
+const ALLOWED_BASES = (process.env.ALLOWED_BASES || '').split(',').filter(Boolean);
+const ALLOWED_TABLES = (process.env.ALLOWED_TABLES || '').split(',').filter(Boolean);
+
+// Rate limiting (simple in-memory store - use Redis in production for multi-instance)
+const rateLimitStore = new Map();
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 30; // 30 requests per minute per IP
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const key = ip;
+  const record = rateLimitStore.get(key);
+  
+  if (!record || now - record.resetTime > RATE_LIMIT_WINDOW) {
+    rateLimitStore.set(key, { count: 1, resetTime: now });
+    return true;
+  }
+  
+  if (record.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return false;
+  }
+  
+  record.count++;
+  return true;
+}
+
+// Verify Firebase token
+async function verifyFirebaseToken(idToken) {
+  if (!idToken) return null;
+  
+  try {
+    initFirebaseAdmin();
+    if (!firebaseAdminInitialized) {
+      // In production (Vercel), require Firebase Admin
+      if (process.env.VERCEL) {
+        console.warn('Firebase Admin not configured in production - authentication disabled');
+        return null;
+      }
+      // Dev mode: allow without verification
+      return { uid: 'dev-user', email: 'dev@localhost' };
+    }
+    
+    const auth = getAuth();
+    const decodedToken = await auth.verifyIdToken(idToken);
+    return decodedToken;
+  } catch (error) {
+    console.error('Token verification failed:', error.message);
+    return null;
+  }
+}
+
+// Validate and sanitize path
+function validatePath(path) {
+  if (!path || typeof path !== 'string') return null;
+  
+  // Remove any path traversal attempts
+  if (path.includes('..') || path.includes('//')) return null;
+  
+  // Only allow alphanumeric, hyphens, underscores, and forward slashes
+  if (!/^[a-zA-Z0-9_\-/]+$/.test(path)) return null;
+  
+  return path.trim();
+}
+
+// Validate base ID
+function validateBaseId(baseId) {
+  if (!baseId || typeof baseId !== 'string') return false;
+  if (!baseId.startsWith('app')) return false;
+  if (ALLOWED_BASES.length > 0 && !ALLOWED_BASES.includes(baseId)) {
+    return false;
+  }
+  return /^app[a-zA-Z0-9]+$/.test(baseId);
+}
+
+// Validate table name/ID
+function validateTableName(tableName) {
+  if (!tableName || typeof tableName !== 'string') return false;
+  if (ALLOWED_TABLES.length > 0 && !ALLOWED_TABLES.includes(tableName)) {
+    return false;
+  }
+  // Allow table IDs (tbl...) or table names (alphanumeric, spaces, hyphens)
+  return /^(tbl[a-zA-Z0-9]+|[a-zA-Z0-9\s\-_]+)$/.test(tableName);
+}
+
 export default async function handler(req, res) {
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', process.env.ALLOWED_ORIGIN || '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   // Only allow POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  // Rate limiting
+  const clientIp = req.headers['x-forwarded-for']?.split(',')[0] || req.headers['x-real-ip'] || 'unknown';
+  if (!checkRateLimit(clientIp)) {
+    return res.status(429).json({ error: 'Too many requests' });
+  }
+
+  // Verify Firebase authentication
+  const authHeader = req.headers.authorization;
+  const idToken = authHeader?.replace('Bearer ', '');
+  const user = await verifyFirebaseToken(idToken);
+  
+  if (!user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
   const { path, method = 'GET', body } = req.body;
 
-  if (!path) {
-    return res.status(400).json({ error: 'Missing path' });
+  // Validate path
+  const sanitizedPath = validatePath(path);
+  if (!sanitizedPath) {
+    return res.status(400).json({ error: 'Invalid path' });
   }
 
   const AIRTABLE_API_KEY = process.env.AIRTABLE_API_KEY;
   const DEFAULT_BASE_ID = process.env.AIRTABLE_BASE_ID;
 
-  // Debug: log available env vars (remove in production)
-  console.log('Environment check:', {
-    hasApiKey: !!AIRTABLE_API_KEY,
-    hasBaseId: !!DEFAULT_BASE_ID,
-    envKeys: Object.keys(process.env).filter(k => k.includes('AIRTABLE'))
-  });
-
   if (!AIRTABLE_API_KEY) {
-    return res.status(500).json({ 
-      error: 'Server configuration missing: AIRTABLE_API_KEY',
-      hint: 'Make sure AIRTABLE_API_KEY is in .env.local file in the selfhosted/ directory'
-    });
+    return res.status(500).json({ error: 'Server configuration error' });
   }
 
   try {
-    // Path can be either "table/record" (uses default base) or "baseId/table/record" (specified base)
-    const pathParts = path.split('/');
+    // Parse and validate path
+    const pathParts = sanitizedPath.split('/').filter(Boolean);
     let baseId, tablePath;
     
-    // Check if first part looks like a base ID (starts with "app")
+    // Check if first part is a base ID
     if (pathParts[0]?.startsWith('app') && pathParts.length > 1) {
       baseId = pathParts[0];
       tablePath = pathParts.slice(1).join('/');
     } else {
-      // Use default base
       if (!DEFAULT_BASE_ID) {
-        return res.status(500).json({ error: 'Server configuration missing: AIRTABLE_BASE_ID' });
+        return res.status(500).json({ error: 'Server configuration error' });
       }
       baseId = DEFAULT_BASE_ID;
-      tablePath = path;
+      tablePath = sanitizedPath;
+    }
+
+    // Validate base ID
+    if (!validateBaseId(baseId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Extract and validate table name
+    const tablePart = tablePath.split('/')[0];
+    if (!validateTableName(tablePart)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Only allow GET and PATCH methods
+    if (method !== 'GET' && method !== 'PATCH') {
+      return res.status(405).json({ error: 'Method not allowed' });
     }
 
     const url = `https://api.airtable.com/v0/${baseId}/${tablePath}`;
