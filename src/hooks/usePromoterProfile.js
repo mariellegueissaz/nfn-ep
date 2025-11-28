@@ -167,7 +167,46 @@ export function usePromoterProfile(userEmail, mappings) {
         return updated;
     }, [sourceBaseId, sourceCrmTable]);
 
-    return {promoterRecord, promoterRecordId, contacts, loading, error, save, saveContact, reload};
+    const createContact = useCallback(async (fields) => {
+        // Create new CRM record
+        const newRecord = await airtableApi.createRecordInBase(sourceBaseId, sourceCrmTable, fields);
+        const newContactId = newRecord.id;
+
+        // Link to promoter: get current linked contacts and add new one
+        const currentPromoter = await airtableApi.getRecordInBase(sourceBaseId, sourcePromotersTable, sourcePromoterRecordId, { noQuery: true });
+        const currentLinks = currentPromoter?.fields?.[sourceContactsLinkField] || [];
+        const updatedLinks = Array.isArray(currentLinks) ? [...currentLinks, newContactId] : [newContactId];
+
+        // Update promoter with new link
+        await airtableApi.updateRecordInBase(sourceBaseId, sourcePromotersTable, sourcePromoterRecordId, {
+            [sourceContactsLinkField]: updatedLinks
+        });
+
+        // Reload contacts to include the new one
+        await reload();
+        return newRecord;
+    }, [sourceBaseId, sourceCrmTable, sourcePromotersTable, sourcePromoterRecordId, sourceContactsLinkField, reload]);
+
+    const unlinkContact = useCallback(async (contactRecordId) => {
+        // Get current linked contacts
+        const currentPromoter = await airtableApi.getRecordInBase(sourceBaseId, sourcePromotersTable, sourcePromoterRecordId, { noQuery: true });
+        const currentLinks = currentPromoter?.fields?.[sourceContactsLinkField] || [];
+        
+        // Remove the contact ID from the array
+        const updatedLinks = Array.isArray(currentLinks) 
+            ? currentLinks.filter(id => id !== contactRecordId)
+            : [];
+
+        // Update promoter to unlink
+        await airtableApi.updateRecordInBase(sourceBaseId, sourcePromotersTable, sourcePromoterRecordId, {
+            [sourceContactsLinkField]: updatedLinks
+        });
+
+        // Reload contacts
+        await reload();
+    }, [sourceBaseId, sourcePromotersTable, sourcePromoterRecordId, sourceContactsLinkField, reload]);
+
+    return {promoterRecord, promoterRecordId, contacts, loading, error, save, saveContact, createContact, unlinkContact, reload};
 }
 
 

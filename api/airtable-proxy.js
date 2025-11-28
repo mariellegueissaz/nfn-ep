@@ -209,9 +209,14 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Only allow GET and PATCH methods
-    if (method !== 'GET' && method !== 'PATCH') {
+    // Only allow GET, PATCH, and POST methods
+    if (method !== 'GET' && method !== 'PATCH' && method !== 'POST') {
       return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    // For POST (create), path should be just the table name
+    if (method === 'POST' && tablePath.split('/').length > 1) {
+      return res.status(400).json({ error: 'Invalid path for POST request' });
     }
 
     const url = `https://api.airtable.com/v0/${baseId}/${tablePath}`;

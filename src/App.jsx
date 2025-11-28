@@ -1,7 +1,10 @@
 import React, {useEffect, useMemo, useState} from 'react';
+import {Routes, Route, useLocation} from 'react-router-dom';
 import {initializeApp} from 'firebase/app';
 import {getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged} from 'firebase/auth';
 import EventsList from './components/EventsList.jsx';
+import Header from './components/Header.jsx';
+import EventDetails from './components/EventDetails.jsx';
 import {useAirtableData} from './hooks/useAirtableData.js';
 import {usePromoterProfile} from './hooks/usePromoterProfile.js';
 import ProfileModal from './components/ProfileModal.jsx';
@@ -76,12 +79,6 @@ export default function App() {
         return () => unsubscribe();
     }, [auth]);
 
-    const {records, loading: dataLoading, error: dataError} = useAirtableData(
-        tableName,
-        currentUser?.email,
-        fieldMappings
-    );
-
     const promoterMappings = useMemo(() => ({
         // CRM path configuration
         crmEmailField: import.meta.env.VITE_CRM_EMAIL_FIELD || 'E-mail',
@@ -105,9 +102,16 @@ export default function App() {
         contactAuthorizedField: import.meta.env.VITE_SOURCE_CONTACT_AUTHORIZED || 'Authorized to sign'
     }), [fieldMappings]);
 
-    const {promoterRecord, contacts, loading: promoterLoading, error: promoterError, save: savePromoter, saveContact, reload: reloadPromoter} = usePromoterProfile(
+    const {promoterRecord, promoterRecordId, contacts, loading: promoterLoading, error: promoterError, save: savePromoter, saveContact, createContact, unlinkContact, reload: reloadPromoter} = usePromoterProfile(
         currentUser?.email,
         promoterMappings
+    );
+
+    const {records, loading: dataLoading, error: dataError} = useAirtableData(
+        tableName,
+        promoterRecord,
+        promoterRecordId,
+        fieldMappings
     );
 
     const handleSaveProfile = async (values) => {
@@ -212,6 +216,11 @@ export default function App() {
         }
     };
 
+    const handleNavigateHome = () => {
+        setIsProfileOpen(false);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
     const handleBackToEmail = () => { setStep('email'); setPassword(''); setConfirmPassword(''); setError(''); };
     const handleBackToChoice = () => { setStep('choice'); setPassword(''); setConfirmPassword(''); setError(''); };
 
@@ -228,7 +237,7 @@ export default function App() {
 
     if (step === 'success' && currentUser) {
         return (
-            <div className="min-h-screen w-full p-4 sm:p-6 bg-gray-gray50 dark:bg-gray-gray800">
+            <div className="min-h-screen w-full bg-gray-gray50 dark:bg-gray-gray800">
                 {showSuccessNotification && (
                     <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 animate-fade-in">
                         <div className="bg-green-green text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-2">
@@ -237,15 +246,31 @@ export default function App() {
                         </div>
                     </div>
                 )}
-                <EventsList
-                    records={records}
-                    loading={dataLoading}
-                    error={dataError}
-                    fieldMappings={fieldMappings}
-                    onLogout={handleLogout}
-                    currentUserEmail={currentUser.email}
+                <Header
                     onOpenProfile={() => setIsProfileOpen(true)}
+                    onLogout={handleLogout}
+                    onNavigateHome={handleNavigateHome}
                 />
+                <Routes>
+                    <Route
+                        path="/"
+                        element={
+                            <div className="p-4 sm:p-6">
+                                <EventsList
+                                    records={records}
+                                    loading={dataLoading}
+                                    error={dataError}
+                                    fieldMappings={fieldMappings}
+                                    currentUserEmail={currentUser.email}
+                                />
+                            </div>
+                        }
+                    />
+                    <Route
+                        path="/events/:eventId"
+                        element={<EventDetails fieldMappings={fieldMappings} />}
+                    />
+                </Routes>
                 <ProfileModal
                     open={isProfileOpen}
                     onClose={() => setIsProfileOpen(false)}
@@ -254,6 +279,9 @@ export default function App() {
                     mappings={promoterMappings}
                     onSave={handleSaveProfile}
                     onSaveContact={saveContact}
+                    onCreateContact={createContact}
+                    onUnlinkContact={unlinkContact}
+                    loading={promoterLoading}
                     saving={isSavingProfile}
                     error={promoterError}
                     saveError={saveProfileError}

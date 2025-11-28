@@ -74,3 +74,4 @@ Comma-separated list of table IDs or names that can be accessed.
 - [ ] All `VITE_*` variables set (these are safe to be public)
 - [ ] Test that unauthorized access attempts are blocked
 
+

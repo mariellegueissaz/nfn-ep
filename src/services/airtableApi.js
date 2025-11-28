@@ -129,6 +129,11 @@ class AirtableApiService {
         const path = `${baseId}/${encodeURIComponent(tableNameOrId)}/${recordId}`;
         return this.callProxy(path, 'PATCH', { fields });
     }
+
+    async createRecordInBase(baseId, tableNameOrId, fields) {
+        const path = `${baseId}/${encodeURIComponent(tableNameOrId)}`;
+        return this.callProxy(path, 'POST', { fields });
+    }
 }
 
 export default new AirtableApiService();

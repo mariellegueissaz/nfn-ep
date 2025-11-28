@@ -12,7 +12,8 @@
         "firebase": "^12.4.0",
         "firebase-admin": "^13.0.0",
         "react": "^19.1.0",
-        "react-dom": "^19.1.0"
+        "react-dom": "^19.1.0",
+        "react-router-dom": "^7.9.6"
     },
     "devDependencies": {
         "autoprefixer": "^10.4.20",
