@@ -32,13 +32,23 @@ loadLocalEnv();
 
 // Initialize Firebase Admin (for token verification)
 let firebaseAdminInitialized = false;
+let firebaseAdminError = null;
 function initFirebaseAdmin() {
   if (firebaseAdminInitialized) return;
+  if (firebaseAdminError) return; // Don't retry if already failed
   
   try {
     const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
     if (serviceAccount) {
-      const serviceAccountJson = JSON.parse(serviceAccount);
+      let serviceAccountJson;
+      try {
+        serviceAccountJson = JSON.parse(serviceAccount);
+      } catch (parseError) {
+        firebaseAdminError = `Failed to parse FIREBASE_SERVICE_ACCOUNT JSON: ${parseError.message}`;
+        console.error('Firebase Admin JSON parse error:', firebaseAdminError);
+        return;
+      }
+      
       if (!getApps().length) {
         initializeApp({
           credential: cert(serviceAccountJson)
@@ -47,7 +57,8 @@ function initFirebaseAdmin() {
       firebaseAdminInitialized = true;
     }
   } catch (e) {
-    console.error('Firebase Admin init error:', e.message);
+    firebaseAdminError = `Firebase Admin initialization failed: ${e.message}`;
+    console.error('Firebase Admin init error:', firebaseAdminError);
   }
 }
 
@@ -137,40 +148,50 @@ function validateTableName(tableName) {
 }
 
 export default async function handler(req, res) {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', process.env.ALLOWED_ORIGIN || '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  try {
+    // CORS headers
+    res.setHeader('Access-Control-Allow-Origin', process.env.ALLOWED_ORIGIN || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
 
-  // Only allow POST requests
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+    // Only allow POST requests
+    if (req.method !== 'POST') {
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
 
-  // Rate limiting
-  const clientIp = req.headers['x-forwarded-for']?.split(',')[0] || req.headers['x-real-ip'] || 'unknown';
-  if (!checkRateLimit(clientIp)) {
-    return res.status(429).json({ error: 'Too many requests' });
-  }
+    // Rate limiting
+    const clientIp = req.headers['x-forwarded-for']?.split(',')[0] || req.headers['x-real-ip'] || 'unknown';
+    if (!checkRateLimit(clientIp)) {
+      return res.status(429).json({ error: 'Too many requests' });
+    }
 
-  // Verify Firebase authentication
-  const authHeader = req.headers.authorization;
-  const idToken = authHeader?.replace('Bearer ', '');
-  const user = await verifyFirebaseToken(idToken);
-  
-  if (!user) {
-    // In production, if Firebase Admin is not configured, provide a helpful error
+    // Verify Firebase authentication
+    const authHeader = req.headers.authorization;
+    const idToken = authHeader?.replace('Bearer ', '');
+    
+    // Check for Firebase Admin initialization errors
+    if (firebaseAdminError) {
+      return res.status(500).json({ 
+        error: `Server configuration error: ${firebaseAdminError}. Please check your FIREBASE_SERVICE_ACCOUNT environment variable in Vercel.` 
+      });
+    }
+    
+    // In production, require Firebase Service Account
     if (process.env.VERCEL && !process.env.FIREBASE_SERVICE_ACCOUNT) {
       return res.status(500).json({ 
         error: 'Server configuration error: FIREBASE_SERVICE_ACCOUNT environment variable is not set. Please configure Firebase Admin in Vercel environment variables.' 
       });
     }
-    return res.status(401).json({ error: 'Unauthorized: Invalid or missing authentication token' });
-  }
+    
+    const user = await verifyFirebaseToken(idToken);
+    
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized: Invalid or missing authentication token' });
+    }
 
   const { path, method = 'GET', body } = req.body;
 
@@ -184,7 +205,9 @@ export default async function handler(req, res) {
   const DEFAULT_BASE_ID = process.env.AIRTABLE_BASE_ID;
 
   if (!AIRTABLE_API_KEY) {
-    return res.status(500).json({ error: 'Server configuration error' });
+    return res.status(500).json({ 
+      error: 'Server configuration error: AIRTABLE_API_KEY environment variable is not set. Please configure it in Vercel environment variables.' 
+    });
   }
 
   try {
@@ -198,7 +221,9 @@ export default async function handler(req, res) {
       tablePath = pathParts.slice(1).join('/');
     } else {
       if (!DEFAULT_BASE_ID) {
-        return res.status(500).json({ error: 'Server configuration error' });
+        return res.status(500).json({ 
+          error: 'Server configuration error: AIRTABLE_BASE_ID environment variable is not set. Please configure it in Vercel environment variables.' 
+        });
       }
       baseId = DEFAULT_BASE_ID;
       tablePath = sanitizedPath;
@@ -274,6 +299,16 @@ export default async function handler(req, res) {
     return res.status(200).json(data);
   } catch (error) {
     console.error('Airtable proxy error:', error);
-    return res.status(500).json({ error: error.message || 'Proxy error' });
+    return res.status(500).json({ 
+      error: error.message || 'Proxy error',
+      details: process.env.VERCEL ? 'Check Vercel function logs for more details' : error.stack
+    });
+  }
+  } catch (outerError) {
+    console.error('Handler error:', outerError);
+    return res.status(500).json({ 
+      error: outerError.message || 'Internal server error',
+      details: process.env.VERCEL ? 'Check Vercel function logs for more details' : outerError.stack
+    });
   }
 }
