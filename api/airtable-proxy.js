@@ -163,7 +163,13 @@ export default async function handler(req, res) {
   const user = await verifyFirebaseToken(idToken);
   
   if (!user) {
-    return res.status(401).json({ error: 'Unauthorized' });
+    // In production, if Firebase Admin is not configured, provide a helpful error
+    if (process.env.VERCEL && !process.env.FIREBASE_SERVICE_ACCOUNT) {
+      return res.status(500).json({ 
+        error: 'Server configuration error: FIREBASE_SERVICE_ACCOUNT environment variable is not set. Please configure Firebase Admin in Vercel environment variables.' 
+      });
+    }
+    return res.status(401).json({ error: 'Unauthorized: Invalid or missing authentication token' });
   }
 
   const { path, method = 'GET', body } = req.body;
