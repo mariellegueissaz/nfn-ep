@@ -39,26 +39,47 @@ function initFirebaseAdmin() {
   
   try {
     const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
-    if (serviceAccount) {
-      let serviceAccountJson;
-      try {
-        serviceAccountJson = JSON.parse(serviceAccount);
-      } catch (parseError) {
-        firebaseAdminError = `Failed to parse FIREBASE_SERVICE_ACCOUNT JSON: ${parseError.message}`;
-        console.error('Firebase Admin JSON parse error:', firebaseAdminError);
-        return;
+    
+    // Check if service account is missing or empty
+    if (!serviceAccount || serviceAccount.trim() === '') {
+      if (process.env.VERCEL) {
+        firebaseAdminError = 'FIREBASE_SERVICE_ACCOUNT environment variable is not set or is empty';
+        console.error('Firebase Admin error:', firebaseAdminError);
       }
-      
+      return;
+    }
+    
+    let serviceAccountJson;
+    try {
+      serviceAccountJson = JSON.parse(serviceAccount);
+    } catch (parseError) {
+      firebaseAdminError = `Failed to parse FIREBASE_SERVICE_ACCOUNT JSON: ${parseError.message}. Make sure the JSON is valid and properly formatted.`;
+      console.error('Firebase Admin JSON parse error:', firebaseAdminError);
+      return;
+    }
+    
+    // Validate required fields in service account
+    if (!serviceAccountJson.project_id || !serviceAccountJson.private_key || !serviceAccountJson.client_email) {
+      firebaseAdminError = 'FIREBASE_SERVICE_ACCOUNT JSON is missing required fields (project_id, private_key, or client_email)';
+      console.error('Firebase Admin error:', firebaseAdminError);
+      return;
+    }
+    
+    try {
       if (!getApps().length) {
         initializeApp({
           credential: cert(serviceAccountJson)
         });
       }
       firebaseAdminInitialized = true;
+      console.log('Firebase Admin initialized successfully');
+    } catch (initError) {
+      firebaseAdminError = `Firebase Admin initialization failed: ${initError.message}`;
+      console.error('Firebase Admin init error:', firebaseAdminError);
     }
   } catch (e) {
-    firebaseAdminError = `Firebase Admin initialization failed: ${e.message}`;
-    console.error('Firebase Admin init error:', firebaseAdminError);
+    firebaseAdminError = `Unexpected error during Firebase Admin setup: ${e.message}`;
+    console.error('Firebase Admin unexpected error:', firebaseAdminError);
   }
 }
 
@@ -96,6 +117,10 @@ async function verifyFirebaseToken(idToken) {
   try {
     initFirebaseAdmin();
     if (!firebaseAdminInitialized) {
+      // If we have a specific error, it will be handled by the main handler
+      if (firebaseAdminError) {
+        return null;
+      }
       // In production (Vercel), require Firebase Admin
       if (process.env.VERCEL) {
         console.warn('Firebase Admin not configured in production - authentication disabled');
@@ -169,9 +194,8 @@ export default async function handler(req, res) {
       return res.status(429).json({ error: 'Too many requests' });
     }
 
-    // Verify Firebase authentication
-    const authHeader = req.headers.authorization;
-    const idToken = authHeader?.replace('Bearer ', '');
+    // Initialize Firebase Admin early to catch configuration errors
+    initFirebaseAdmin();
     
     // Check for Firebase Admin initialization errors
     if (firebaseAdminError) {
@@ -186,7 +210,10 @@ export default async function handler(req, res) {
         error: 'Server configuration error: FIREBASE_SERVICE_ACCOUNT environment variable is not set. Please configure Firebase Admin in Vercel environment variables.' 
       });
     }
-    
+
+    // Verify Firebase authentication
+    const authHeader = req.headers.authorization;
+    const idToken = authHeader?.replace('Bearer ', '');
     const user = await verifyFirebaseToken(idToken);
     
     if (!user) {
