@@ -40,6 +40,16 @@ function initFirebaseAdmin() {
   try {
     const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
     
+    // Debug logging in production
+    if (process.env.VERCEL) {
+      console.log('FIREBASE_SERVICE_ACCOUNT check:', {
+        exists: !!serviceAccount,
+        length: serviceAccount ? serviceAccount.length : 0,
+        startsWith: serviceAccount ? serviceAccount.substring(0, 50) : 'N/A',
+        hasNewlines: serviceAccount ? serviceAccount.includes('\n') : false
+      });
+    }
+    
     // Check if service account is missing or empty
     if (!serviceAccount || serviceAccount.trim() === '') {
       if (process.env.VERCEL) {
@@ -143,13 +153,22 @@ async function verifyFirebaseToken(idToken) {
 function validatePath(path) {
   if (!path || typeof path !== 'string') return null;
   
+  // Decode URL encoding first
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(path);
+  } catch (e) {
+    // If decoding fails, use original path
+    decodedPath = path;
+  }
+  
   // Remove any path traversal attempts
-  if (path.includes('..') || path.includes('//')) return null;
+  if (decodedPath.includes('..') || decodedPath.includes('//')) return null;
   
-  // Only allow alphanumeric, hyphens, underscores, and forward slashes
-  if (!/^[a-zA-Z0-9_\-/]+$/.test(path)) return null;
+  // Only allow alphanumeric, hyphens, underscores, spaces, and forward slashes (after decoding)
+  if (!/^[a-zA-Z0-9_\-\s/]+$/.test(decodedPath)) return null;
   
-  return path.trim();
+  return decodedPath.trim();
 }
 
 // Validate base ID
@@ -165,10 +184,23 @@ function validateBaseId(baseId) {
 // Validate table name/ID
 function validateTableName(tableName) {
   if (!tableName || typeof tableName !== 'string') return false;
-  if (ALLOWED_TABLES.length > 0 && !ALLOWED_TABLES.includes(tableName)) {
+  
+  // If whitelist is configured, check against it
+  if (ALLOWED_TABLES.length > 0) {
+    // Check exact match first
+    if (ALLOWED_TABLES.includes(tableName)) {
+      return true;
+    }
+    // Also check if any allowed table matches when trimmed/lowercased (for flexibility)
+    const normalizedTableName = tableName.trim();
+    if (ALLOWED_TABLES.some(allowed => allowed.trim() === normalizedTableName)) {
+      return true;
+    }
+    // If whitelist exists but no match, deny access
     return false;
   }
-  // Allow table IDs (tbl...) or table names (alphanumeric, spaces, hyphens)
+  
+  // If no whitelist, allow table IDs (tbl...) or table names (alphanumeric, spaces, hyphens)
   return /^(tbl[a-zA-Z0-9]+|[a-zA-Z0-9\s\-_]+)$/.test(tableName);
 }
 
@@ -225,6 +257,11 @@ export default async function handler(req, res) {
   // Validate path
   const sanitizedPath = validatePath(path);
   if (!sanitizedPath) {
+    console.error('Path validation failed:', { 
+      originalPath: path, 
+      pathType: typeof path,
+      pathLength: path?.length 
+    });
     return res.status(400).json({ error: 'Invalid path' });
   }
 
@@ -261,9 +298,15 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Extract and validate table name
-    const tablePart = tablePath.split('/')[0];
+    // Extract and validate table name (decode URL encoding)
+    const tablePartRaw = tablePath.split('/')[0];
+    const tablePart = decodeURIComponent(tablePartRaw);
     if (!validateTableName(tablePart)) {
+      console.error('Table validation failed:', { 
+        raw: tablePartRaw, 
+        decoded: tablePart, 
+        allowed: ALLOWED_TABLES 
+      });
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -277,7 +320,9 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Invalid path for POST request' });
     }
 
-    const url = `https://api.airtable.com/v0/${baseId}/${tablePath}`;
+    // Encode each path segment for the Airtable API URL
+    const encodedTablePath = tablePath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+    const url = `https://api.airtable.com/v0/${baseId}/${encodedTablePath}`;
     
     const headers = {
       'Authorization': `Bearer ${AIRTABLE_API_KEY}`,

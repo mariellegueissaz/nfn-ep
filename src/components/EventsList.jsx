@@ -1,6 +1,6 @@
 import React, {useState} from 'react';
 import { useNavigate } from 'react-router-dom';
-import { parseDate, formatDate } from '../utils/dateUtils.js';
+import { parseDate, formatDate, formatDateOnly } from '../utils/dateUtils.js';
 
 function renderLocationValue(val) {
     if (!val) return '—';
@@ -31,7 +31,7 @@ export default function EventsList({records, loading, error, fieldMappings, curr
             <div className="min-h-screen w-full flex items-center justify-center p-4">
                 <div className="text-center">
                     <div className="w-16 h-16 border-4 border-blue-blue border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                    <p className="text-gray-gray600 dark:text-gray-gray300">Loading...</p>
+                    <p className="text-gray-gray600 dark:text-gray-gray300">Loading Events</p>
                 </div>
             </div>
         );
@@ -146,11 +146,11 @@ export default function EventsList({records, loading, error, fieldMappings, curr
                                                         </div>
                                                         <div>
                                                             <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400">Proposed Announcement Date</dt>
-                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 mt-1">{formatDate(records.find(r => r.id === item.id)?.fields?.[fieldMappings.proposedAnnouncementDateField]) || '—'}</dd>
+                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 mt-1">{formatDateOnly(records.find(r => r.id === item.id)?.fields?.[fieldMappings.proposedAnnouncementDateField]) || '—'}</dd>
                                                         </div>
                                                         <div>
                                                             <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400">Proposed Ticket on Sale Date</dt>
-                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 mt-1">{formatDate(records.find(r => r.id === item.id)?.fields?.[fieldMappings.publicTicketReleaseDateField]) || '—'}</dd>
+                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 mt-1">{formatDateOnly(records.find(r => r.id === item.id)?.fields?.[fieldMappings.publicTicketReleaseDateField]) || '—'}</dd>
                                                         </div>
                                                         <div>
                                                             <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400">Location</dt>
@@ -221,11 +221,11 @@ export default function EventsList({records, loading, error, fieldMappings, curr
                                                         </div>
                                                         <div>
                                                             <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400">Proposed Announcement Date</dt>
-                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 mt-1">{formatDate(records.find(r => r.id === item.id)?.fields?.[fieldMappings.proposedAnnouncementDateField]) || '—'}</dd>
+                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 mt-1">{formatDateOnly(records.find(r => r.id === item.id)?.fields?.[fieldMappings.proposedAnnouncementDateField]) || '—'}</dd>
                                                         </div>
                                                         <div>
                                                             <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400">Proposed Ticket on Sale Date</dt>
-                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 mt-1">{formatDate(records.find(r => r.id === item.id)?.fields?.[fieldMappings.publicTicketReleaseDateField]) || '—'}</dd>
+                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 mt-1">{formatDateOnly(records.find(r => r.id === item.id)?.fields?.[fieldMappings.publicTicketReleaseDateField]) || '—'}</dd>
                                                         </div>
                                                         <div>
                                                             <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400">Location</dt>
@@ -295,11 +295,11 @@ export default function EventsList({records, loading, error, fieldMappings, curr
                                                         </div>
                                                         <div>
                                                             <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400">Proposed Announcement Date</dt>
-                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 mt-1">{formatDate(records.find(r => r.id === item.id)?.fields?.[fieldMappings.proposedAnnouncementDateField]) || '—'}</dd>
+                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 mt-1">{formatDateOnly(records.find(r => r.id === item.id)?.fields?.[fieldMappings.proposedAnnouncementDateField]) || '—'}</dd>
                                                         </div>
                                                         <div>
                                                             <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400">Proposed Ticket on Sale Date</dt>
-                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 mt-1">{formatDate(records.find(r => r.id === item.id)?.fields?.[fieldMappings.publicTicketReleaseDateField]) || '—'}</dd>
+                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 mt-1">{formatDateOnly(records.find(r => r.id === item.id)?.fields?.[fieldMappings.publicTicketReleaseDateField]) || '—'}</dd>
                                                         </div>
                                                         <div>
                                                             <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400">Location</dt>

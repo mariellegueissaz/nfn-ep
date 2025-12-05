@@ -2,7 +2,7 @@ import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import airtableApi from '../services/airtableApi.js';
 import EPSubmissionModal from './EPSubmissionModal.jsx';
-import { parseDate, formatDate } from '../utils/dateUtils.js';
+import { parseDate, formatDate, formatDateOnly } from '../utils/dateUtils.js';
 
 function renderLocationValue(val) {
     if (!val) return '—';
@@ -46,7 +46,8 @@ export default function EventDetails({ fieldMappings }) {
                     const epSubmissionId = typeof epSubmissionIds[0] === 'object' ? epSubmissionIds[0].id : epSubmissionIds[0];
                     try {
                         setLoadingSubmission(true);
-                        const epSubmissionTable = import.meta.env.VITE_EP_SUBMISSION_TABLE_NAME || import.meta.env.VITE_EP_SUBMISSION_TABLE_ID || 'EP Submissions';
+                        const epSubmissionTable = import.meta.env.VITE_EP_SUBMISSION_TABLE_NAME || import.meta.env.VITE_EP_SUBMISSION_TABLE_ID || 'EP Submission';
+                        console.log('[EventDetails] Fetching EP Submission:', { table: epSubmissionTable, id: epSubmissionId });
                         const submissionRecord = await airtableApi.getRecord(epSubmissionTable, epSubmissionId, {
                             cellFormat: 'string',
                             timeZone: 'Europe/Zurich',
@@ -228,7 +229,9 @@ export default function EventDetails({ fieldMappings }) {
                         </div>
                         <div>
                             <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed Announcement Date</dt>
-                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDate(event.fields?.[fieldMappings.proposedAnnouncementDateField]) || '—'}</dd>
+                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">
+                                {formatDateOnly(event.fields?.[fieldMappings.proposedAnnouncementDateField] || event.fields?.['Announcement date']) || '—'}
+                            </dd>
                         </div>
                         <div>
                             <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed Ticket on Sale Date</dt>
@@ -249,7 +252,14 @@ export default function EventDetails({ fieldMappings }) {
 
                 {epSubmission && (
                     <div className="mt-6">
-                        <h2 className="text-xl font-semibold text-gray-gray800 dark:text-gray-gray100 mb-4">My Submission</h2>
+                        {(() => {
+                            const submissionDate = epSubmission.fields?.['Date'];
+                            const formattedDate = submissionDate ? formatDate(submissionDate) : '';
+                            const title = formattedDate ? `Submission ${formattedDate}` : 'Submission';
+                            return (
+                                <h2 className="text-xl font-semibold text-gray-gray800 dark:text-gray-gray100 mb-4">{title}</h2>
+                            );
+                        })()}
                         <div className="bg-white dark:bg-gray-gray700 rounded-lg shadow p-6">
                             {loadingSubmission ? (
                                 <div className="flex items-center justify-center py-8">
@@ -257,26 +267,47 @@ export default function EventDetails({ fieldMappings }) {
                                     <span className="ml-3 text-gray-gray600 dark:text-gray-gray300">Loading submission...</span>
                                 </div>
                             ) : (
-                                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div>
-                                        <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Start</dt>
-                                        <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDate(epSubmission.fields?.['Doors open']) || '—'}</dd>
+                                <>
+                                    {/* Eventname and Approval status badge on same row */}
+                                    <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-gray200 dark:border-gray-gray600">
+                                        <div>
+                                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Eventname</dt>
+                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{epSubmission.fields?.['Eventname'] || '—'}</dd>
+                                        </div>
+                                        {(() => {
+                                            const approveEventInfo = epSubmission.fields?.['Approve Event Info'];
+                                            const isApproved = approveEventInfo === true || approveEventInfo === 'true' || approveEventInfo === 1 || approveEventInfo === '1';
+                                            return (
+                                                <span className={`px-4 py-1.5 rounded-full text-sm font-medium ${
+                                                    isApproved 
+                                                        ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' 
+                                                        : 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300'
+                                                }`}>
+                                                    {isApproved ? 'Approved' : 'Pending'}
+                                                </span>
+                                            );
+                                        })()}
                                     </div>
+                                    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Start</dt>
+                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDate(epSubmission.fields?.['Doors open']) || '—'}</dd>
+                                        </div>
                                     <div>
                                         <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">End</dt>
                                         <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDate(epSubmission.fields?.['End']) || '—'}</dd>
                                     </div>
                                     <div>
-                                        <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Announcement date</dt>
-                                        <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDate(epSubmission.fields?.['Announcement date']) || '—'}</dd>
+                                        <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed Announcement Date</dt>
+                                        <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDateOnly(epSubmission.fields?.['Announcement date']) || '—'}</dd>
                                     </div>
                                     <div>
-                                        <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Tickets on sale</dt>
+                                        <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed Ticket on Sale Date</dt>
                                         <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">
-                                            {formatDate(epSubmission.fields?.['Tickets on sale']) || 
-                                             formatDate(epSubmission.fields?.['Tickets on Sale']) || 
-                                             formatDate(epSubmission.fields?.['Public ticket release']) ||
-                                             formatDate(epSubmission.fields?.['Public ticket release date']) ||
+                                            {formatDateOnly(epSubmission.fields?.['Tickets on sale']) || 
+                                             formatDateOnly(epSubmission.fields?.['Tickets on Sale']) || 
+                                             formatDateOnly(epSubmission.fields?.['Public ticket release']) ||
+                                             formatDateOnly(epSubmission.fields?.['Public ticket release date']) ||
                                              '—'}
                                         </dd>
                                     </div>
@@ -287,10 +318,68 @@ export default function EventDetails({ fieldMappings }) {
                                         </dd>
                                     </div>
                                     <div>
-                                        <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed timetable</dt>
+                                        <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed line-up (and timetable)</dt>
                                         <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 whitespace-pre-wrap">{epSubmission.fields?.['Proposed timetable'] || '—'}</dd>
                                     </div>
+                                    {(() => {
+                                        // Calculate load times from event record if submission fields are empty
+                                        const doorsOpenStr = event?.fields?.[fieldMappings.startDateField];
+                                        const endStr = event?.fields?.[fieldMappings.endDateField];
+                                        const doorsOpen = doorsOpenStr ? parseDate(doorsOpenStr) : null;
+                                        const end = endStr ? parseDate(endStr) : null;
+
+                                        // Get submission field values
+                                        const loadInStartSubmission = epSubmission.fields?.['Proposed production load in start'];
+                                        const loadInEndSubmission = epSubmission.fields?.['Proposed production load in end'];
+                                        const loadOutStartSubmission = epSubmission.fields?.['Proposed production load out start'];
+                                        const loadOutEndSubmission = epSubmission.fields?.['Proposed production load out end'];
+
+                                        // Calculate from event if submission fields are empty
+                                        let loadInStart = loadInStartSubmission;
+                                        let loadInEnd = loadInEndSubmission;
+                                        let loadOutStart = loadOutStartSubmission;
+                                        let loadOutEnd = loadOutEndSubmission;
+
+                                        if (!loadInStart && doorsOpen) {
+                                            const loadInStartDate = new Date(doorsOpen.getTime() - 4 * 60 * 60 * 1000);
+                                            loadInStart = loadInStartDate.toISOString();
+                                        }
+                                        if (!loadInEnd && doorsOpen) {
+                                            const loadInEndDate = new Date(doorsOpen.getTime() - 2 * 60 * 60 * 1000);
+                                            loadInEnd = loadInEndDate.toISOString();
+                                        }
+                                        if (!loadOutStart && end) {
+                                            const loadOutStartDate = new Date(end.getTime() + 0.5 * 60 * 60 * 1000);
+                                            loadOutStart = loadOutStartDate.toISOString();
+                                        }
+                                        if (!loadOutEnd && end) {
+                                            const loadOutEndDate = new Date(end.getTime() + 1.5 * 60 * 60 * 1000);
+                                            loadOutEnd = loadOutEndDate.toISOString();
+                                        }
+
+                                        return (
+                                            <>
+                                                <div>
+                                                    <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Load In Start</dt>
+                                                    <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{loadInStart ? formatDate(loadInStart) : '—'}</dd>
+                                                </div>
+                                                <div>
+                                                    <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Load In End</dt>
+                                                    <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{loadInEnd ? formatDate(loadInEnd) : '—'}</dd>
+                                                </div>
+                                                <div>
+                                                    <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Load Out Start</dt>
+                                                    <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{loadOutStart ? formatDate(loadOutStart) : '—'}</dd>
+                                                </div>
+                                                <div>
+                                                    <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Load Out End</dt>
+                                                    <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{loadOutEnd ? formatDate(loadOutEnd) : '—'}</dd>
+                                                </div>
+                                            </>
+                                        );
+                                    })()}
                                 </dl>
+                                </>
                             )}
                         </div>
                     </div>

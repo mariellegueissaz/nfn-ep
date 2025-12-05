@@ -44,7 +44,7 @@ export default function App() {
         endDateField: import.meta.env.VITE_FIELD_END || 'End',
         eventNameField: import.meta.env.VITE_FIELD_EVENT_NAME || 'Eventname',
         locationField: import.meta.env.VITE_FIELD_LOCATION || 'Location',
-        proposedAnnouncementDateField: import.meta.env.VITE_FIELD_PROPOSED_ANNOUNCEMENT || 'Proposed Announcement Date',
+        proposedAnnouncementDateField: import.meta.env.VITE_FIELD_PROPOSED_ANNOUNCEMENT || 'Announcement date',
         publicTicketReleaseDateField: import.meta.env.VITE_FIELD_PUBLIC_TICKET_RELEASE || 'Proposed Ticket on Sale Date',
         proposedLineupField: import.meta.env.VITE_FIELD_PROPOSED_LINEUP || 'Proposed line-up (and timetable)'
     }), []);
@@ -258,7 +258,7 @@ export default function App() {
                             <div className="p-4 sm:p-6">
                                 <EventsList
                                     records={records}
-                                    loading={dataLoading}
+                                    loading={promoterLoading || dataLoading}
                                     error={dataError}
                                     fieldMappings={fieldMappings}
                                     currentUserEmail={currentUser.email}

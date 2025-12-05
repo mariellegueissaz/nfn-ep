@@ -10,7 +10,9 @@ export function useAirtableData(tableName, promoterRecord, promoterRecordId, fie
         let isActive = true;
 
         async function run() {
+            // Show loading while waiting for promoter record
             if (!tableName || !promoterRecord) {
+                setLoading(true);
                 setRecords([]);
                 return;
             }

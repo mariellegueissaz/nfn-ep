@@ -47,3 +47,21 @@ export function formatDate(iso) {
     return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
 
+/**
+ * Formats a Date object or ISO string to DD/MM/YYYY format (date only, no time)
+ * @param {Date|string} iso - Date object or ISO string
+ * @returns {string} Formatted date string or empty string if invalid
+ */
+export function formatDateOnly(iso) {
+    if (!iso) return '';
+    const date = iso instanceof Date ? iso : parseDate(iso);
+    if (!date) return '';
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+}
+
+
+
+
