@@ -122,21 +122,24 @@ function checkRateLimit(ip) {
 
 // Verify Firebase token
 async function verifyFirebaseToken(idToken) {
-  if (!idToken) return null;
+  if (!idToken) {
+    // In dev mode (not Vercel), allow requests without token
+    if (!process.env.VERCEL) {
+      return { uid: 'dev-user', email: 'dev@localhost' };
+    }
+    return null;
+  }
   
   try {
     initFirebaseAdmin();
     if (!firebaseAdminInitialized) {
-      // If we have a specific error, it will be handled by the main handler
-      if (firebaseAdminError) {
-        return null;
-      }
       // In production (Vercel), require Firebase Admin
       if (process.env.VERCEL) {
         console.warn('Firebase Admin not configured in production - authentication disabled');
         return null;
       }
-      // Dev mode: allow without verification
+      // Dev mode: allow without verification (even if Firebase Admin failed to initialize)
+      console.log('Dev mode: allowing request without Firebase Admin verification');
       return { uid: 'dev-user', email: 'dev@localhost' };
     }
     
@@ -145,6 +148,11 @@ async function verifyFirebaseToken(idToken) {
     return decodedToken;
   } catch (error) {
     console.error('Token verification failed:', error.message);
+    // In dev mode, allow even if token verification fails
+    if (!process.env.VERCEL) {
+      console.log('Dev mode: allowing request despite token verification failure');
+      return { uid: 'dev-user', email: 'dev@localhost' };
+    }
     return null;
   }
 }
@@ -229,8 +237,8 @@ export default async function handler(req, res) {
     // Initialize Firebase Admin early to catch configuration errors
     initFirebaseAdmin();
     
-    // Check for Firebase Admin initialization errors
-    if (firebaseAdminError) {
+    // Check for Firebase Admin initialization errors (only in production)
+    if (firebaseAdminError && process.env.VERCEL) {
       return res.status(500).json({ 
         error: `Server configuration error: ${firebaseAdminError}. Please check your FIREBASE_SERVICE_ACCOUNT environment variable in Vercel.` 
       });
