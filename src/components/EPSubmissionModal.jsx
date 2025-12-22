@@ -254,10 +254,13 @@ export default function EPSubmissionModal({ open, onClose, event, fieldMappings,
                 [epSubmissionLinkField]: updatedLinks
             });
 
-            if (onSuccess) {
-                onSuccess(newRecord);
-            }
+            // Close modal first
             onClose();
+            
+            // Call onSuccess with the new record ID so it can wait for it to be linked
+            if (onSuccess) {
+                onSuccess(newRecord.id);
+            }
         } catch (err) {
             console.error('Failed to create EP Submission:', err);
             setError(err?.message || 'Failed to create EP Submission');

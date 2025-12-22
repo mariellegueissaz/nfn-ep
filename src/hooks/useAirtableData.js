@@ -75,6 +75,9 @@ export function useAirtableData(tableName, promoterRecord, promoterRecordId, fie
                 console.log('[Events] Filter formula:', filterFormula);
                 console.log('[Events] Table name:', tableName);
                 
+                // Note: Not filtering fields here because Airtable requires exact field name matches
+                // and field names may vary. The other optimizations (records map, memoization, parallel loading)
+                // provide the main performance improvements.
                 const data = await airtableApi.getRecords(tableName, {
                     filterByFormula: filterFormula,
                     sort: { field: fieldMappings.startDateField, direction: 'asc' },
