@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import airtableApi from '../services/airtableApi.js';
 import { parseDate } from '../utils/dateUtils.js';
 
-export default function EPSubmissionModal({ open, onClose, event, fieldMappings, onSuccess }) {
+export default function EPSubmissionModal({ open, onClose, event, fieldMappings, onSuccess, hideLoadTimes = false }) {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
     const [values, setValues] = useState({});
@@ -195,71 +195,177 @@ export default function EPSubmissionModal({ open, onClose, event, fieldMappings,
             return;
         }
 
-        if (!values['Load time necessary'] || values['Load time necessary'] === '') {
-            setError('Load time necessary is required');
-            setSaving(false);
-            return;
-        }
+        // Only validate load times if hideLoadTimes is false
+        if (!hideLoadTimes) {
+            if (!values['Load time necessary'] || values['Load time necessary'] === '') {
+                setError('Load time necessary is required');
+                setSaving(false);
+                return;
+            }
 
-        // If "Suggest Load times" is selected, validate load time fields
-        if (values['Load time necessary'] === 'Suggest Load times') {
-            if (!values['Proposed production load in start']) {
-                setError('Load In Start is required when load times are suggested');
-                setSaving(false);
-                return;
-            }
-            if (!values['Proposed production load in end']) {
-                setError('Load In End is required when load times are suggested');
-                setSaving(false);
-                return;
-            }
-            if (!values['Proposed production load out start']) {
-                setError('Load Out Start is required when load times are suggested');
-                setSaving(false);
-                return;
-            }
-            if (!values['Proposed production load out end']) {
-                setError('Load Out End is required when load times are suggested');
-                setSaving(false);
-                return;
+            // If "Suggest Load times" is selected, validate load time fields
+            if (values['Load time necessary'] === 'Suggest Load times') {
+                if (!values['Proposed production load in start']) {
+                    setError('Load In Start is required when load times are suggested');
+                    setSaving(false);
+                    return;
+                }
+                if (!values['Proposed production load in end']) {
+                    setError('Load In End is required when load times are suggested');
+                    setSaving(false);
+                    return;
+                }
+                if (!values['Proposed production load out start']) {
+                    setError('Load Out Start is required when load times are suggested');
+                    setSaving(false);
+                    return;
+                }
+                if (!values['Proposed production load out end']) {
+                    setError('Load Out End is required when load times are suggested');
+                    setSaving(false);
+                    return;
+                }
             }
         }
 
         try {
             const epSubmissionTable = import.meta.env.VITE_EP_SUBMISSION_TABLE_NAME || import.meta.env.VITE_EP_SUBMISSION_TABLE_ID || 'EP Submission';
             const baseId = import.meta.env.VITE_AIRTABLE_BASE_ID;
-            
-            // Prepare fields for creation
-            const fields = {};
-            for (const [key, value] of Object.entries(values)) {
-                if (value !== null && value !== undefined && value !== '') {
-                    fields[key] = value;
-                }
-            }
-
-            // Create EP Submission record
-            const newRecord = await airtableApi.createRecordInBase(baseId, epSubmissionTable, fields);
-            
-            // Link the EP Submission to the Event
             const eventsTable = import.meta.env.VITE_TABLE_NAME || import.meta.env.VITE_TABLE_ID;
             const epSubmissionLinkField = import.meta.env.VITE_EP_SUBMISSION_LINK_FIELD || 'EP Submission';
             
             // Get current EP Submission links from event
             const currentEvent = await airtableApi.getRecord(eventsTable, event.id, { noQuery: true });
             const currentLinks = currentEvent?.fields?.[epSubmissionLinkField] || [];
-            const updatedLinks = Array.isArray(currentLinks) ? [...currentLinks, newRecord.id] : [newRecord.id];
+            let updatedLinks = Array.isArray(currentLinks) ? [...currentLinks] : [];
             
-            // Update event with new EP Submission link
-            await airtableApi.updateRecord(eventsTable, event.id, {
-                [epSubmissionLinkField]: updatedLinks
-            });
+            // If hideLoadTimes is true, create a single general submission record
+            if (hideLoadTimes) {
+                // Single record creation without load times
+                const fields = {};
+                for (const [key, value] of Object.entries(values)) {
+                    // Skip load time related fields
+                    if (key === 'Load time necessary' || 
+                        key === 'Proposed production load in start' || 
+                        key === 'Proposed production load in end' || 
+                        key === 'Proposed production load out start' || 
+                        key === 'Proposed production load out end') {
+                        continue;
+                    }
+                    if (value !== null && value !== undefined && value !== '') {
+                        fields[key] = value;
+                    }
+                }
+                // Set Load times = false for general record
+                fields['Load times'] = false;
 
-            // Close modal first
-            onClose();
-            
-            // Call onSuccess with the new record ID so it can wait for it to be linked
-            if (onSuccess) {
-                onSuccess(newRecord.id);
+                // Create EP Submission record
+                const newRecord = await airtableApi.createRecordInBase(baseId, epSubmissionTable, fields);
+                
+                // Link the EP Submission to the Event
+                updatedLinks.push(newRecord.id);
+                
+                // Update event with new EP Submission link
+                await airtableApi.updateRecord(eventsTable, event.id, {
+                    [epSubmissionLinkField]: updatedLinks
+                });
+
+                // Close modal first
+                onClose();
+                
+                // Call onSuccess with the new record ID
+                if (onSuccess) {
+                    onSuccess(newRecord.id);
+                }
+            } else if (values['Load time necessary'] === 'Suggest Load times') {
+                // If "Suggest Load times" is selected, create 2 records
+                // Record 1: General info (Load times = false)
+                const generalFields = {};
+                const loadTimeFields = ['Proposed production load in start', 'Proposed production load in end', 'Proposed production load out start', 'Proposed production load out end', 'Load time necessary'];
+                
+                for (const [key, value] of Object.entries(values)) {
+                    // Skip load time fields and Load time necessary for general record
+                    if (loadTimeFields.includes(key)) continue;
+                    if (value !== null && value !== undefined && value !== '') {
+                        generalFields[key] = value;
+                    }
+                }
+                // Set Load times = false for general record
+                generalFields['Load times'] = false;
+                
+                // Record 2: Load times only (Load times = true)
+                const loadTimeOnlyFields = {
+                    'Load time necessary': 'Suggest Load times',
+                    'Load times': true,
+                    'Eventname': values['Eventname'] || '',
+                    'Doors open': values['Doors open'] || '',
+                    'End': values['End'] || ''
+                };
+                
+                // Add load time fields
+                if (values['Proposed production load in start']) {
+                    loadTimeOnlyFields['Proposed production load in start'] = values['Proposed production load in start'];
+                }
+                if (values['Proposed production load in end']) {
+                    loadTimeOnlyFields['Proposed production load in end'] = values['Proposed production load in end'];
+                }
+                if (values['Proposed production load out start']) {
+                    loadTimeOnlyFields['Proposed production load out start'] = values['Proposed production load out start'];
+                }
+                if (values['Proposed production load out end']) {
+                    loadTimeOnlyFields['Proposed production load out end'] = values['Proposed production load out end'];
+                }
+                
+                // Create both records
+                const [generalRecord, loadTimeRecord] = await Promise.all([
+                    airtableApi.createRecordInBase(baseId, epSubmissionTable, generalFields),
+                    airtableApi.createRecordInBase(baseId, epSubmissionTable, loadTimeOnlyFields)
+                ]);
+                
+                // Link both records to the event
+                updatedLinks.push(generalRecord.id, loadTimeRecord.id);
+                
+                // Update event with both EP Submission links
+                await airtableApi.updateRecord(eventsTable, event.id, {
+                    [epSubmissionLinkField]: updatedLinks
+                });
+
+                // Close modal first
+                onClose();
+                
+                // Call onSuccess with the general record ID (or both IDs)
+                if (onSuccess) {
+                    onSuccess(generalRecord.id);
+                }
+            } else {
+                // Single record creation (existing logic)
+                const fields = {};
+                for (const [key, value] of Object.entries(values)) {
+                    if (value !== null && value !== undefined && value !== '') {
+                        fields[key] = value;
+                    }
+                }
+                // Set Load times = false for single record
+                fields['Load times'] = false;
+
+                // Create EP Submission record
+                const newRecord = await airtableApi.createRecordInBase(baseId, epSubmissionTable, fields);
+                
+                // Link the EP Submission to the Event
+                updatedLinks.push(newRecord.id);
+                
+                // Update event with new EP Submission link
+                await airtableApi.updateRecord(eventsTable, event.id, {
+                    [epSubmissionLinkField]: updatedLinks
+                });
+
+                // Close modal first
+                onClose();
+                
+                // Call onSuccess with the new record ID
+                if (onSuccess) {
+                    onSuccess(newRecord.id);
+                }
             }
         } catch (err) {
             console.error('Failed to create EP Submission:', err);
@@ -301,7 +407,7 @@ export default function EPSubmissionModal({ open, onClose, event, fieldMappings,
                 <form id="ep-submission-form" onSubmit={handleSubmit} className="space-y-4">
                     {/* Event Name */}
                     <div>
-                        <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Event name for online communication <span className="text-red-red">*</span></label>
+                        <label className="block text-xs uppercase font-semibold text-gray-gray700 dark:text-gray-gray300 mb-1">Event name for online communication <span className="text-red-red">*</span></label>
                         <p className="text-xs text-gray-gray500 dark:text-gray-gray400 mb-2">This name will be used for online event listing and marketing communication</p>
                         <input
                             type="text"
@@ -314,20 +420,20 @@ export default function EPSubmissionModal({ open, onClose, event, fieldMappings,
 
                     {/* Locations */}
                     <div>
-                            <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-2">Location <span className="text-red-red">*</span></label>
+                            <label className="block text-xs uppercase font-semibold text-gray-gray700 dark:text-gray-gray300 mb-2">Location <span className="text-red-red">*</span></label>
                             {loadingLocations ? (
                                 <div className="w-full px-3 py-2 border border-gray-gray300 dark:border-gray-gray600 rounded-md bg-gray-gray50 dark:bg-gray-gray800 text-gray-gray600 dark:text-gray-gray400">
                                     Loading locations...
                                 </div>
                             ) : (
                                 <>
-                                    {/* Selected locations as chips */}
+                                    {/* Selected locations as chips and Select Location button */}
                                     {(() => {
                                         const selectedIds = Array.isArray(values['Location']) ? values['Location'] : (values['Location'] ? [values['Location']] : []);
                                         const selectedLocations = locations.filter(loc => selectedIds.includes(loc.id));
                                         
                                         return (
-                                            <div className="flex flex-wrap gap-2 mb-3">
+                                            <div className="flex flex-wrap items-center gap-2">
                                                 {selectedLocations.map(location => (
                                                     <div
                                                         key={location.id}
@@ -349,18 +455,18 @@ export default function EPSubmissionModal({ open, onClose, event, fieldMappings,
                                                         </button>
                                                     </div>
                                                 ))}
+                                                
+                                                {/* Select Location button */}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowLocationSelector(!showLocationSelector)}
+                                                    className="px-4 py-2 border border-gray-gray300 dark:border-gray-gray600 rounded-md bg-white dark:bg-gray-gray800 text-gray-gray800 dark:text-gray-gray100 hover:bg-gray-gray50 dark:hover:bg-gray-gray700 transition-colors text-sm font-medium"
+                                                >
+                                                    Select Location
+                                                </button>
                                             </div>
                                         );
                                     })()}
-                                    
-                                    {/* Select Location button */}
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowLocationSelector(!showLocationSelector)}
-                                        className="px-4 py-2 border border-gray-gray300 dark:border-gray-gray600 rounded-md bg-white dark:bg-gray-gray800 text-gray-gray800 dark:text-gray-gray100 hover:bg-gray-gray50 dark:hover:bg-gray-gray700 transition-colors text-sm font-medium"
-                                    >
-                                        Select Location
-                                    </button>
                                     
                                     {/* Available locations to select (shown when expanded) */}
                                     {showLocationSelector && (
@@ -404,7 +510,7 @@ export default function EPSubmissionModal({ open, onClose, event, fieldMappings,
                     {/* Doors Open - End */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Doors Open <span className="text-red-red">*</span></label>
+                            <label className="block text-xs uppercase font-semibold text-gray-gray700 dark:text-gray-gray300 mb-1">Doors Open <span className="text-red-red">*</span></label>
                             <input
                                 type="datetime-local"
                                 value={values['Doors open'] ? (() => {
@@ -422,7 +528,7 @@ export default function EPSubmissionModal({ open, onClose, event, fieldMappings,
                             />
                         </div>
                         <div>
-                            <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">End <span className="text-red-red">*</span></label>
+                            <label className="block text-xs uppercase font-semibold text-gray-gray700 dark:text-gray-gray300 mb-1">End <span className="text-red-red">*</span></label>
                             <input
                                 type="datetime-local"
                                 value={values['End'] ? (() => {
@@ -444,7 +550,7 @@ export default function EPSubmissionModal({ open, onClose, event, fieldMappings,
                     {/* Announcement date - Tickets on sale */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed Announcement Date</label>
+                            <label className="block text-xs uppercase font-semibold text-gray-gray700 dark:text-gray-gray300 mb-1">Proposed Announcement Date</label>
                             <p className="text-xs text-gray-gray500 dark:text-gray-gray400 mb-2">(If already known)</p>
                             <input
                                 type="date"
@@ -462,7 +568,7 @@ export default function EPSubmissionModal({ open, onClose, event, fieldMappings,
                             />
                         </div>
                         <div>
-                            <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed Ticket on Sale Date</label>
+                            <label className="block text-xs uppercase font-semibold text-gray-gray700 dark:text-gray-gray300 mb-1">Proposed Ticket on Sale Date</label>
                             <p className="text-xs text-gray-gray500 dark:text-gray-gray400 mb-2">(If already known)</p>
                             <input
                                 type="date"
@@ -483,7 +589,7 @@ export default function EPSubmissionModal({ open, onClose, event, fieldMappings,
 
                     {/* Proposed timetable */}
                     <div>
-                        <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed line-up (and timetable)</label>
+                        <label className="block text-xs uppercase font-semibold text-gray-gray700 dark:text-gray-gray300 mb-1">Proposed line-up (and timetable)</label>
                         <textarea
                             value={values['Proposed timetable'] || ''}
                             onChange={(e) => setValues(prev => ({...prev, 'Proposed timetable': e.target.value}))}
@@ -492,127 +598,129 @@ export default function EPSubmissionModal({ open, onClose, event, fieldMappings,
                         />
                     </div>
 
-                    {/* LOAD-IN AND OUT TIMES Section */}
-                    <div className="mt-6 pt-6 border-t border-gray-gray200 dark:border-gray-gray600">
-                        <h3 className="text-sm font-semibold text-gray-gray800 dark:text-gray-gray100 mb-4 uppercase">LOAD-IN AND OUT TIMES</h3>
-                        <div className="mb-4">
-                            <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-2">Will you need load-in time for extra production or deco? <span className="text-red-red">*</span></label>
-                            <div className="space-y-2">
-                                <label className="flex items-center cursor-pointer">
-                                    <input
-                                        type="radio"
-                                        name="load-time-necessary"
-                                        value="No need for Load times"
-                                        checked={values['Load time necessary'] === 'No need for Load times'}
-                                        onChange={(e) => setValues(prev => ({...prev, 'Load time necessary': e.target.value}))}
-                                        className="mr-2 text-blue-blue focus:ring-blue-blue"
-                                    />
-                                    <span className="text-sm text-gray-gray800 dark:text-gray-gray100">No need for Load times</span>
-                                </label>
-                                <label className="flex items-center cursor-pointer">
-                                    <input
-                                        type="radio"
-                                        name="load-time-necessary"
-                                        value="Suggest Load times"
-                                        checked={values['Load time necessary'] === 'Suggest Load times'}
-                                        onChange={(e) => setValues(prev => ({...prev, 'Load time necessary': e.target.value}))}
-                                        className="mr-2 text-blue-blue focus:ring-blue-blue"
-                                    />
-                                    <span className="text-sm text-gray-gray800 dark:text-gray-gray100">Suggest Load times</span>
-                                </label>
+                    {/* LOAD-IN AND OUT TIMES Section - only show if hideLoadTimes is false */}
+                    {!hideLoadTimes && (
+                        <div className="mt-6 pt-6 border-t border-gray-gray200 dark:border-gray-gray600">
+                            <h3 className="text-sm font-semibold text-gray-gray800 dark:text-gray-gray100 mb-4 uppercase">LOAD-IN AND OUT TIMES</h3>
+                            <div className="mb-4">
+                                <label className="block text-xs uppercase font-semibold text-gray-gray700 dark:text-gray-gray300 mb-2">Will you need load-in time for extra production or deco? <span className="text-red-red">*</span></label>
+                                <div className="space-y-2">
+                                    <label className="flex items-center cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="load-time-necessary"
+                                            value="No need for Load times"
+                                            checked={values['Load time necessary'] === 'No need for Load times'}
+                                            onChange={(e) => setValues(prev => ({...prev, 'Load time necessary': e.target.value}))}
+                                            className="mr-2 text-blue-blue focus:ring-blue-blue"
+                                        />
+                                        <span className="text-sm text-gray-gray800 dark:text-gray-gray100">No need for Load times</span>
+                                    </label>
+                                    <label className="flex items-center cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="load-time-necessary"
+                                            value="Suggest Load times"
+                                            checked={values['Load time necessary'] === 'Suggest Load times'}
+                                            onChange={(e) => setValues(prev => ({...prev, 'Load time necessary': e.target.value}))}
+                                            className="mr-2 text-blue-blue focus:ring-blue-blue"
+                                        />
+                                        <span className="text-sm text-gray-gray800 dark:text-gray-gray100">Suggest Load times</span>
+                                    </label>
+                                </div>
                             </div>
-                        </div>
 
-                        {values['Load time necessary'] === 'Suggest Load times' && (
-                            <>
-                                <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
-                                    <p className="text-sm text-blue-800 dark:text-blue-300">
-                                        These are the standard load-in and -out times we offer. If needed, please update them to the times you are planning. We will confirm your request as soon as possible.
-                                    </p>
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Load In Start <span className="text-red-red">*</span></label>
-                                        <input
-                                            type="datetime-local"
-                                            value={values['Proposed production load in start'] ? (() => {
-                                                try {
-                                                    const date = new Date(values['Proposed production load in start']);
-                                                    if (isNaN(date.getTime())) return '';
-                                                    const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-                                                    return localDate.toISOString().slice(0, 16);
-                                                } catch {
-                                                    return '';
-                                                }
-                                            })() : ''}
-                                            onChange={(e) => setValues(prev => ({...prev, 'Proposed production load in start': e.target.value ? new Date(e.target.value).toISOString() : ''}))}
-                                            className="w-full px-3 py-2 border border-gray-gray300 dark:border-gray-gray600 rounded-md bg-white dark:bg-gray-gray800 text-gray-gray800 dark:text-gray-gray100"
-                                        />
+                            {values['Load time necessary'] === 'Suggest Load times' && (
+                                <>
+                                    <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
+                                        <p className="text-sm text-blue-800 dark:text-blue-300">
+                                            These are the standard load-in and -out times we offer. If needed, please update them to the times you are planning. We will confirm your request as soon as possible.
+                                        </p>
                                     </div>
-                                    <div>
-                                        <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Load In End <span className="text-red-red">*</span></label>
-                                        <input
-                                            type="datetime-local"
-                                            value={values['Proposed production load in end'] ? (() => {
-                                                try {
-                                                    const date = new Date(values['Proposed production load in end']);
-                                                    if (isNaN(date.getTime())) return '';
-                                                    const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-                                                    return localDate.toISOString().slice(0, 16);
-                                                } catch {
-                                                    return '';
-                                                }
-                                            })() : ''}
-                                            onChange={(e) => setValues(prev => ({...prev, 'Proposed production load in end': e.target.value ? new Date(e.target.value).toISOString() : ''}))}
-                                            className="w-full px-3 py-2 border border-gray-gray300 dark:border-gray-gray600 rounded-md bg-white dark:bg-gray-gray800 text-gray-gray800 dark:text-gray-gray100"
-                                        />
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs uppercase font-semibold text-gray-gray700 dark:text-gray-gray300 mb-1">Load In Start <span className="text-red-red">*</span></label>
+                                            <input
+                                                type="datetime-local"
+                                                value={values['Proposed production load in start'] ? (() => {
+                                                    try {
+                                                        const date = new Date(values['Proposed production load in start']);
+                                                        if (isNaN(date.getTime())) return '';
+                                                        const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+                                                        return localDate.toISOString().slice(0, 16);
+                                                    } catch {
+                                                        return '';
+                                                    }
+                                                })() : ''}
+                                                onChange={(e) => setValues(prev => ({...prev, 'Proposed production load in start': e.target.value ? new Date(e.target.value).toISOString() : ''}))}
+                                                className="w-full px-3 py-2 border border-gray-gray300 dark:border-gray-gray600 rounded-md bg-white dark:bg-gray-gray800 text-gray-gray800 dark:text-gray-gray100"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs uppercase font-semibold text-gray-gray700 dark:text-gray-gray300 mb-1">Load In End <span className="text-red-red">*</span></label>
+                                            <input
+                                                type="datetime-local"
+                                                value={values['Proposed production load in end'] ? (() => {
+                                                    try {
+                                                        const date = new Date(values['Proposed production load in end']);
+                                                        if (isNaN(date.getTime())) return '';
+                                                        const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+                                                        return localDate.toISOString().slice(0, 16);
+                                                    } catch {
+                                                        return '';
+                                                    }
+                                                })() : ''}
+                                                onChange={(e) => setValues(prev => ({...prev, 'Proposed production load in end': e.target.value ? new Date(e.target.value).toISOString() : ''}))}
+                                                className="w-full px-3 py-2 border border-gray-gray300 dark:border-gray-gray600 rounded-md bg-white dark:bg-gray-gray800 text-gray-gray800 dark:text-gray-gray100"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs uppercase font-semibold text-gray-gray700 dark:text-gray-gray300 mb-1">Load Out Start <span className="text-red-red">*</span></label>
+                                            <input
+                                                type="datetime-local"
+                                                value={values['Proposed production load out start'] ? (() => {
+                                                    try {
+                                                        const date = new Date(values['Proposed production load out start']);
+                                                        if (isNaN(date.getTime())) return '';
+                                                        const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+                                                        return localDate.toISOString().slice(0, 16);
+                                                    } catch {
+                                                        return '';
+                                                    }
+                                                })() : ''}
+                                                onChange={(e) => setValues(prev => ({...prev, 'Proposed production load out start': e.target.value ? new Date(e.target.value).toISOString() : ''}))}
+                                                className="w-full px-3 py-2 border border-gray-gray300 dark:border-gray-gray600 rounded-md bg-white dark:bg-gray-gray800 text-gray-gray800 dark:text-gray-gray100"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs uppercase font-semibold text-gray-gray700 dark:text-gray-gray300 mb-1">Load Out End <span className="text-red-red">*</span></label>
+                                            <input
+                                                type="datetime-local"
+                                                value={values['Proposed production load out end'] ? (() => {
+                                                    try {
+                                                        const date = new Date(values['Proposed production load out end']);
+                                                        if (isNaN(date.getTime())) return '';
+                                                        const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+                                                        return localDate.toISOString().slice(0, 16);
+                                                    } catch {
+                                                        return '';
+                                                    }
+                                                })() : ''}
+                                                onChange={(e) => setValues(prev => ({...prev, 'Proposed production load out end': e.target.value ? new Date(e.target.value).toISOString() : ''}))}
+                                                className="w-full px-3 py-2 border border-gray-gray300 dark:border-gray-gray600 rounded-md bg-white dark:bg-gray-gray800 text-gray-gray800 dark:text-gray-gray100"
+                                            />
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Load Out Start <span className="text-red-red">*</span></label>
-                                        <input
-                                            type="datetime-local"
-                                            value={values['Proposed production load out start'] ? (() => {
-                                                try {
-                                                    const date = new Date(values['Proposed production load out start']);
-                                                    if (isNaN(date.getTime())) return '';
-                                                    const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-                                                    return localDate.toISOString().slice(0, 16);
-                                                } catch {
-                                                    return '';
-                                                }
-                                            })() : ''}
-                                            onChange={(e) => setValues(prev => ({...prev, 'Proposed production load out start': e.target.value ? new Date(e.target.value).toISOString() : ''}))}
-                                            className="w-full px-3 py-2 border border-gray-gray300 dark:border-gray-gray600 rounded-md bg-white dark:bg-gray-gray800 text-gray-gray800 dark:text-gray-gray100"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Load Out End <span className="text-red-red">*</span></label>
-                                        <input
-                                            type="datetime-local"
-                                            value={values['Proposed production load out end'] ? (() => {
-                                                try {
-                                                    const date = new Date(values['Proposed production load out end']);
-                                                    if (isNaN(date.getTime())) return '';
-                                                    const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-                                                    return localDate.toISOString().slice(0, 16);
-                                                } catch {
-                                                    return '';
-                                                }
-                                            })() : ''}
-                                            onChange={(e) => setValues(prev => ({...prev, 'Proposed production load out end': e.target.value ? new Date(e.target.value).toISOString() : ''}))}
-                                            className="w-full px-3 py-2 border border-gray-gray300 dark:border-gray-gray600 rounded-md bg-white dark:bg-gray-gray800 text-gray-gray800 dark:text-gray-gray100"
-                                        />
-                                    </div>
-                                </div>
-                            </>
-                        )}
-                    </div>
+                                </>
+                            )}
+                        </div>
+                    )}
 
                     {/* OTHER INFO Section */}
                     <div className="mt-6 pt-6 border-t border-gray-gray200 dark:border-gray-gray600">
                         <h3 className="text-sm font-semibold text-gray-gray800 dark:text-gray-gray100 mb-4 uppercase">OTHER INFO</h3>
                         <div>
-                            <label className="block text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Comment</label>
+                            <label className="block text-xs uppercase font-semibold text-gray-gray700 dark:text-gray-gray300 mb-1">Comment</label>
                             <textarea
                                 value={values['Comment'] || ''}
                                 onChange={(e) => setValues(prev => ({...prev, 'Comment': e.target.value}))}
@@ -639,7 +747,7 @@ export default function EPSubmissionModal({ open, onClose, event, fieldMappings,
                         disabled={saving}
                         className="px-4 py-2 bg-blue-blue text-white rounded-md hover:bg-opacity-90 disabled:opacity-60"
                     >
-                        {saving ? 'Submitting...' : 'Submit Event Info Request'}
+                        {saving ? 'Submitting...' : 'Submit Event Info'}
                     </button>
                 </div>
             </div>

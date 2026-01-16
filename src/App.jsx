@@ -32,6 +32,7 @@ export default function App() {
     const [currentUser, setCurrentUser] = useState(null);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
     const [showSuccessNotification, setShowSuccessNotification] = useState(false);
+    const [justLoggedIn, setJustLoggedIn] = useState(false);
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [isSavingProfile, setIsSavingProfile] = useState(false);
     const [saveProfileError, setSaveProfileError] = useState('');
@@ -72,12 +73,22 @@ export default function App() {
             setIsCheckingAuth(false);
             if (user) {
                 setStep('success');
-                setShowSuccessNotification(true);
-                setTimeout(() => setShowSuccessNotification(false), 3000);
+                // Only show success notification if user just logged in/signed up
+                if (justLoggedIn) {
+                    setShowSuccessNotification(true);
+                    setTimeout(() => {
+                        setShowSuccessNotification(false);
+                        setJustLoggedIn(false);
+                    }, 3000);
+                }
             }
         });
         return () => unsubscribe();
-    }, [auth]);
+    }, [auth, justLoggedIn]);
+
+    const location = useLocation();
+    const isEventDetailsPage = location.pathname.startsWith('/events/');
+    const isMainPage = location.pathname === '/';
 
     const promoterMappings = useMemo(() => ({
         // CRM path configuration
@@ -102,15 +113,19 @@ export default function App() {
         contactAuthorizedField: import.meta.env.VITE_SOURCE_CONTACT_AUTHORIZED || 'Authorized to sign'
     }), [fieldMappings]);
 
+    // Load promoter profile on main page (needed for event filtering) or when profile modal is open
+    // Don't load on event details page
+    const shouldLoadPromoter = isMainPage || isProfileOpen;
     const {promoterRecord, promoterRecordId, contacts, loading: promoterLoading, error: promoterError, save: savePromoter, saveContact, createContact, unlinkContact, reload: reloadPromoter} = usePromoterProfile(
-        currentUser?.email,
+        shouldLoadPromoter ? currentUser?.email : null,
         promoterMappings
     );
 
+    // Only load events on the main page, not on event details page
     const {records, loading: dataLoading, error: dataError} = useAirtableData(
-        tableName,
-        promoterRecord,
-        promoterRecordId,
+        isMainPage ? tableName : null, // Only load on main page
+        isMainPage ? promoterRecord : null, // Only need promoter on main page
+        isMainPage ? promoterRecordId : null, // Only need promoter ID on main page
         fieldMappings
     );
 
@@ -174,9 +189,11 @@ export default function App() {
         if (!auth) { setError('Authentication not configured'); return; }
         try {
             setStep('loading');
+            setJustLoggedIn(true);
             await signInWithEmailAndPassword(auth, email, password);
         } catch (err) {
             setStep('login');
+            setJustLoggedIn(false);
             if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') setError('Invalid email or password');
             else if (err.code === 'auth/too-many-requests') setError('Too many failed attempts. Please try again later.');
             else setError(err.message || 'Login failed');
@@ -191,9 +208,11 @@ export default function App() {
         if (password !== confirmPassword) { setError('Passwords do not match'); return; }
         try {
             setStep('loading');
+            setJustLoggedIn(true);
             await createUserWithEmailAndPassword(auth, email, password);
         } catch (err) {
             setStep('signup');
+            setJustLoggedIn(false);
             if (err.code === 'auth/email-already-in-use') setError('Email already in use. Try logging in instead.');
             else if (err.code === 'auth/weak-password') setError('Password is too weak. Please use a stronger password.');
             else if (err.code === 'auth/invalid-email') setError('Invalid email address');

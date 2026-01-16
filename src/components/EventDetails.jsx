@@ -26,10 +26,74 @@ export default function EventDetails({ fieldMappings }) {
     const [allSubmissions, setAllSubmissions] = React.useState([]); // Store all submissions
     const [selectedSubmissionId, setSelectedSubmissionId] = React.useState(null); // Currently selected submission ID
     const [showSubmissionDropdown, setShowSubmissionDropdown] = React.useState(false);
+    
+    // Separate submissions by Load times field
+    const generalSubmissions = React.useMemo(() => {
+        return allSubmissions.filter(sub => {
+            const loadTimes = sub?.fields?.['Load times'];
+            // Check if it's explicitly false or not set (checkbox unchecked or undefined)
+            const isFalse = loadTimes === false || loadTimes === null || loadTimes === undefined || loadTimes === '';
+            // Also check that it's NOT true
+            const isNotTrue = !(loadTimes === true || loadTimes === 1);
+            return isFalse || isNotTrue;
+        });
+    }, [allSubmissions]);
+    
+    const loadTimeSubmissions = React.useMemo(() => {
+        return allSubmissions.filter(sub => {
+            const loadTimes = sub?.fields?.['Load times'];
+            const loadTimeNecessary = sub?.fields?.['Load time necessary'];
+            // Check for true in checkbox format (true or 1) AND Load time necessary must not be empty
+            const hasLoadTimes = loadTimes === true || loadTimes === 1;
+            const hasLoadTimeNecessary = loadTimeNecessary && loadTimeNecessary !== '' && loadTimeNecessary !== null && loadTimeNecessary !== undefined;
+            return hasLoadTimes && hasLoadTimeNecessary;
+        });
+    }, [allSubmissions]);
+    
+    // Selected submissions for each section
+    const [selectedGeneralSubmissionId, setSelectedGeneralSubmissionId] = React.useState(null);
+    const [selectedLoadTimeSubmissionId, setSelectedLoadTimeSubmissionId] = React.useState(null);
+    const [showGeneralDropdown, setShowGeneralDropdown] = React.useState(false);
+    const [showLoadTimeDropdown, setShowLoadTimeDropdown] = React.useState(false);
+    
+    // Get selected submissions
+    const selectedGeneralSubmission = React.useMemo(() => {
+        return generalSubmissions.find(s => s.id === selectedGeneralSubmissionId) || generalSubmissions[0] || null;
+    }, [generalSubmissions, selectedGeneralSubmissionId]);
+    
+    const selectedLoadTimeSubmission = React.useMemo(() => {
+        return loadTimeSubmissions.find(s => s.id === selectedLoadTimeSubmissionId) || loadTimeSubmissions[0] || null;
+    }, [loadTimeSubmissions, selectedLoadTimeSubmissionId]);
+    
+    // Set initial selected submissions when data loads
+    React.useEffect(() => {
+        // Reset and set general submission
+        if (generalSubmissions.length > 0) {
+            const currentId = selectedGeneralSubmissionId;
+            const exists = generalSubmissions.some(s => s.id === currentId);
+            if (!exists || !currentId) {
+                setSelectedGeneralSubmissionId(generalSubmissions[0].id);
+            }
+        } else {
+            setSelectedGeneralSubmissionId(null);
+        }
+        
+        // Reset and set load time submission
+        if (loadTimeSubmissions.length > 0) {
+            const currentId = selectedLoadTimeSubmissionId;
+            const exists = loadTimeSubmissions.some(s => s.id === currentId);
+            if (!exists || !currentId) {
+                setSelectedLoadTimeSubmissionId(loadTimeSubmissions[0].id);
+            }
+        } else {
+            setSelectedLoadTimeSubmissionId(null);
+        }
+    }, [generalSubmissions, loadTimeSubmissions, selectedGeneralSubmissionId, selectedLoadTimeSubmissionId]);
     const [loading, setLoading] = React.useState(true);
     const [loadingSubmission, setLoadingSubmission] = React.useState(false);
     const [error, setError] = React.useState('');
     const [showEPModal, setShowEPModal] = React.useState(false);
+    const [isNewSubmission, setIsNewSubmission] = React.useState(false);
 
     React.useEffect(() => {
         async function loadEvent() {
@@ -52,17 +116,27 @@ export default function EventDetails({ fieldMappings }) {
                         const epSubmissionTable = import.meta.env.VITE_EP_SUBMISSION_TABLE_NAME || import.meta.env.VITE_EP_SUBMISSION_TABLE_ID || 'EP Submission';
                         console.log('[EventDetails] Fetching all EP Submissions:', { table: epSubmissionTable, totalLinked: linkedIds.length });
                         
-                        // Load all submissions
-                        const submissionPromises = linkedIds.map(id => 
-                            airtableApi.getRecord(epSubmissionTable, id, {
+                        // Load all submissions - fetch without cellFormat first to get checkbox values, then fetch with string format for display
+                        const submissionPromises = linkedIds.map(async id => {
+                            try {
+                                // First fetch without cellFormat to get checkbox values
+                                const rawRecord = await airtableApi.getRecord(epSubmissionTable, id, { noQuery: true });
+                                // Then fetch with string format for display
+                                const formattedRecord = await airtableApi.getRecord(epSubmissionTable, id, {
                                 cellFormat: 'string',
                                 timeZone: 'Europe/Zurich',
                                 userLocale: 'en-GB'
-                            }).catch(err => {
+                                });
+                                // Merge checkbox field from raw record into formatted record
+                                if (rawRecord?.fields?.['Load times'] !== undefined) {
+                                    formattedRecord.fields['Load times'] = rawRecord.fields['Load times'];
+                                }
+                                return formattedRecord;
+                            } catch (err) {
                                 console.error(`[EventDetails] Failed to load submission ${id}:`, err);
                                 return null;
-                            })
-                        );
+                            }
+                        });
                         
                         const submissions = (await Promise.all(submissionPromises)).filter(Boolean);
                         
@@ -87,15 +161,6 @@ export default function EventDetails({ fieldMappings }) {
                             }
                             
                             setAllSubmissions(submissions);
-                            
-                            // Set the latest submission as default (first in sorted array)
-                            if (submissions[0] && submissions[0].id) {
-                                setEpSubmission(submissions[0]);
-                                setSelectedSubmissionId(submissions[0].id);
-                            } else {
-                                setEpSubmission(null);
-                                setSelectedSubmissionId(null);
-                            }
                         } else {
                             setAllSubmissions([]);
                             setEpSubmission(null);
@@ -174,17 +239,30 @@ export default function EventDetails({ fieldMappings }) {
                 if (linkedIds.includes(newSubmissionId)) {
                     // Found it! Load all submissions
                     try {
-                        // Load all submissions
-                        const submissionPromises = linkedIds.map(id => 
-                            airtableApi.getRecord(epSubmissionTable, id, {
+                        // Load all submissions - fetch raw first to get checkbox, then formatted for display
+                        const submissionPromises = linkedIds.map(async id => {
+                            try {
+                                // Fetch raw record to get checkbox value and Load time necessary field
+                                const rawRecord = await airtableApi.getRecord(epSubmissionTable, id, { noQuery: true });
+                                // Fetch formatted record for display
+                                const formattedRecord = await airtableApi.getRecord(epSubmissionTable, id, {
                                 cellFormat: 'string',
                                 timeZone: 'Europe/Zurich',
                                 userLocale: 'en-GB'
-                            }).catch(err => {
+                                });
+                                // Merge checkbox field and Load time necessary from raw record into formatted record
+                                if (rawRecord?.fields?.['Load times'] !== undefined) {
+                                    formattedRecord.fields['Load times'] = rawRecord.fields['Load times'];
+                                }
+                                if (rawRecord?.fields?.['Load time necessary'] !== undefined) {
+                                    formattedRecord.fields['Load time necessary'] = rawRecord.fields['Load time necessary'];
+                                }
+                                return formattedRecord;
+                            } catch (err) {
                                 console.error(`[EventDetails] Failed to load submission ${id}:`, err);
                                 return null;
-                            })
-                        );
+                            }
+                        });
                         
                         const submissions = (await Promise.all(submissionPromises)).filter(Boolean);
                         
@@ -199,12 +277,6 @@ export default function EventDetails({ fieldMappings }) {
                         });
                         
                         setAllSubmissions(submissions);
-                        
-                        // Set the new submission as selected (should be first in sorted array)
-                        if (submissions.length > 0) {
-                            setEpSubmission(submissions[0]);
-                            setSelectedSubmissionId(submissions[0].id);
-                        }
                         
                         // Load event with formatted fields for display
                         const record = await airtableApi.getRecord(tableName, eventId, {
@@ -282,10 +354,6 @@ export default function EventDetails({ fieldMappings }) {
                     
                     setAllSubmissions(submissions);
                     
-                    if (submissions.length > 0) {
-                        setEpSubmission(submissions[0]);
-                        setSelectedSubmissionId(submissions[0].id);
-                    }
                     console.log('[EventDetails] ✓ Loaded all submissions on final attempt');
                 } catch (subErr) {
                     console.error('Failed to load EP Submissions on final attempt:', subErr);
@@ -317,18 +385,24 @@ export default function EventDetails({ fieldMappings }) {
         return isFuture && !hasEPSubmission;
     }, [event, fieldMappings]);
 
-    // Close dropdown when clicking outside
+    // Close dropdowns when clicking outside
     React.useEffect(() => {
         const handleClickOutside = (event) => {
             if (showSubmissionDropdown && !event.target.closest('.submission-dropdown-container')) {
                 setShowSubmissionDropdown(false);
+            }
+            if (showGeneralDropdown && !event.target.closest('.submission-dropdown-container')) {
+                setShowGeneralDropdown(false);
+            }
+            if (showLoadTimeDropdown && !event.target.closest('.submission-dropdown-container')) {
+                setShowLoadTimeDropdown(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
         };
-    }, [showSubmissionDropdown]);
+    }, [showSubmissionDropdown, showGeneralDropdown, showLoadTimeDropdown]);
 
     if (loading) {
         return (
@@ -384,6 +458,76 @@ export default function EventDetails({ fieldMappings }) {
             setShowSubmissionDropdown(false);
         }
     };
+    
+    // Handle general submission selection change
+    const handleGeneralSubmissionChange = (submissionId) => {
+        setSelectedGeneralSubmissionId(submissionId);
+        setShowGeneralDropdown(false);
+    };
+    
+    // Handle load time submission selection change
+    const handleLoadTimeSubmissionChange = (submissionId) => {
+        setSelectedLoadTimeSubmissionId(submissionId);
+        setShowLoadTimeDropdown(false);
+    };
+    
+    // Helper function to render submission dropdown
+    const renderSubmissionDropdown = (submissions, selectedId, showDropdown, setShowDropdown, onChange) => {
+        if (!submissions || submissions.length <= 1) return null;
+        
+        const selectedSubmission = submissions.find(s => s.id === selectedId) || submissions[0];
+        const submissionDate = selectedSubmission?.fields?.['Date'];
+        const formattedDate = submissionDate ? formatDate(submissionDate) : 'No date';
+        
+        return (
+            <div className="relative mb-4 submission-dropdown-container">
+                <button
+                    onClick={() => setShowDropdown(!showDropdown)}
+                    className="flex items-center gap-2 text-xl font-semibold text-gray-gray800 dark:text-gray-gray100 hover:text-blue-blue transition-colors"
+                >
+                    {formattedDate ? `Submission ${formattedDate}` : 'Submission'}
+                    <svg 
+                        className={`w-5 h-5 transition-transform ${showDropdown ? 'rotate-180' : ''}`}
+                        fill="none" 
+                        stroke="currentColor" 
+                        viewBox="0 0 24 24"
+                    >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
+                
+                {showDropdown && (
+                    <div className="absolute top-full left-0 mt-2 w-64 bg-white dark:bg-gray-gray700 rounded-lg shadow-lg border border-gray-gray200 dark:border-gray-gray600 z-10 max-h-96 overflow-y-auto">
+                        {submissions.map((submission) => {
+                            const subDate = submission.fields?.['Date'];
+                            const formattedSubDate = subDate ? formatDate(subDate) : 'No date';
+                            const isSelected = submission.id === selectedId;
+                            return (
+                                <button
+                                    key={submission.id}
+                                    onClick={() => onChange(submission.id)}
+                                    className={`w-full text-left px-4 py-3 hover:bg-gray-gray50 dark:hover:bg-gray-gray600 transition-colors ${
+                                        isSelected ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-blue' : ''
+                                    }`}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <span className={`text-sm ${isSelected ? 'font-medium text-blue-blue' : 'text-gray-gray800 dark:text-gray-gray100'}`}>
+                                            {formattedSubDate}
+                                        </span>
+                                        {isSelected && (
+                                            <svg className="w-4 h-4 text-blue-blue" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                            </svg>
+                                        )}
+                                    </div>
+                                </button>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     return (
         <div className="min-h-screen w-full bg-gray-gray50 dark:bg-gray-gray800">
@@ -402,7 +546,10 @@ export default function EventDetails({ fieldMappings }) {
                     <div className="mb-4 p-4 bg-yellow-100 dark:bg-yellow-900/20 border border-yellow-400 dark:border-yellow-600 rounded-lg flex items-center justify-between">
                         <span className="text-yellow-800 dark:text-yellow-300">Please submit info</span>
                         <button
-                            onClick={() => setShowEPModal(true)}
+                            onClick={() => {
+                                setIsNewSubmission(false);
+                                setShowEPModal(true);
+                            }}
                             className="px-4 py-2 bg-blue-blue text-white rounded-md hover:bg-opacity-90 transition-colors text-sm font-medium"
                         >
                             Create EP Submission
@@ -411,113 +558,86 @@ export default function EventDetails({ fieldMappings }) {
                 )}
 
                 <div className="bg-white dark:bg-gray-gray700 rounded-lg shadow p-6">
-                    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
                         <div>
-                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Start</dt>
+                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                Start
+                            </dt>
                             <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDate(event.fields?.[fieldMappings.startDateField]) || '—'}</dd>
                         </div>
                         <div>
-                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">End</dt>
+                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                End
+                            </dt>
                             <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDate(event.fields?.[fieldMappings.endDateField]) || '—'}</dd>
                         </div>
                         <div>
-                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed Announcement Date</dt>
+                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                Proposed Announcement Date
+                            </dt>
                             <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">
                                 {formatDateOnly(event.fields?.[fieldMappings.proposedAnnouncementDateField] || event.fields?.['Announcement date']) || '—'}
                             </dd>
                         </div>
                         <div>
-                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed Ticket on Sale Date</dt>
+                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                Proposed Ticket on Sale Date
+                            </dt>
                             <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDate(event.fields?.[fieldMappings.publicTicketReleaseDateField]) || '—'}</dd>
                         </div>
                         <div>
-                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Location</dt>
+                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                Location
+                            </dt>
                             <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">
                                 {renderLocationValue(event.fields?.[fieldMappings.locationField])}
                             </dd>
                         </div>
                         <div>
-                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed line-up (and timetable)</dt>
+                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                                </svg>
+                                Proposed line-up (and timetable)
+                            </dt>
                             <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 whitespace-pre-wrap">{event.fields?.[fieldMappings.proposedLineupField] || '—'}</dd>
                         </div>
                     </dl>
                 </div>
 
-                {(epSubmission || loadingSubmission) && (
+                {(generalSubmissions.length > 0 || loadTimeSubmissions.length > 0 || loadingSubmission) && (
                     <div className="mt-6">
-                        {epSubmission && Array.isArray(allSubmissions) && allSubmissions.length > 0 && (
-                            <div className="relative mb-4 submission-dropdown-container">
-                                <button
-                                    onClick={() => setShowSubmissionDropdown(!showSubmissionDropdown)}
-                                    className="flex items-center gap-2 text-xl font-semibold text-gray-gray800 dark:text-gray-gray100 hover:text-blue-blue transition-colors"
-                                >
-                                    {(() => {
-                                        const submissionDate = epSubmission.fields?.['Date'];
-                                        const formattedDate = submissionDate ? formatDate(submissionDate) : '';
-                                        return formattedDate ? `Submission ${formattedDate}` : 'Submission';
-                                    })()}
-                                    {allSubmissions && allSubmissions.length > 1 && (
-                                        <svg 
-                                            className={`w-5 h-5 transition-transform ${showSubmissionDropdown ? 'rotate-180' : ''}`}
-                                            fill="none" 
-                                            stroke="currentColor" 
-                                            viewBox="0 0 24 24"
-                                        >
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                                        </svg>
-                                    )}
-                                </button>
-                                
-                                {showSubmissionDropdown && Array.isArray(allSubmissions) && allSubmissions.length > 1 && (
-                                    <div className="absolute top-full left-0 mt-2 w-64 bg-white dark:bg-gray-gray700 rounded-lg shadow-lg border border-gray-gray200 dark:border-gray-gray600 z-10 max-h-96 overflow-y-auto">
-                                        {allSubmissions.map((submission) => {
-                                            const submissionDate = submission.fields?.['Date'];
-                                            const formattedDate = submissionDate ? formatDate(submissionDate) : 'No date';
-                                            const isSelected = submission.id === selectedSubmissionId;
-                                            return (
-                                                <button
-                                                    key={submission.id}
-                                                    onClick={() => handleSubmissionChange(submission.id)}
-                                                    className={`w-full text-left px-4 py-3 hover:bg-gray-gray50 dark:hover:bg-gray-gray600 transition-colors ${
-                                                        isSelected ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-blue' : ''
-                                                    }`}
-                                                >
-                                                    <div className="flex items-center justify-between">
-                                                        <span className={`text-sm ${isSelected ? 'font-medium text-blue-blue' : 'text-gray-gray800 dark:text-gray-gray100'}`}>
-                                                            {formattedDate}
-                                                        </span>
-                                                        {isSelected && (
-                                                            <svg className="w-4 h-4 text-blue-blue" fill="currentColor" viewBox="0 0 20 20">
-                                                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                                            </svg>
-                                                        )}
-                                                    </div>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                        {!epSubmission && loadingSubmission && (
+                        {loadingSubmission ? (
                             <div className="mb-4">
-                                <div className="text-xl font-semibold text-gray-gray800 dark:text-gray-gray100">Submission</div>
+                                <div className="text-xl font-semibold text-gray-gray800 dark:text-gray-gray100">Loading submissions...</div>
                             </div>
-                        )}
-                        <div className="bg-white dark:bg-gray-gray700 rounded-lg shadow p-6">
-                            {loadingSubmission ? (
-                                <div className="flex items-center justify-center py-8">
-                                    <div className="w-8 h-8 border-4 border-blue-blue border-t-transparent rounded-full animate-spin"></div>
-                                    <span className="ml-3 text-gray-gray600 dark:text-gray-gray300">Loading submission...</span>
-                                </div>
-                            ) : epSubmission && (
-                                <>
-                                    {/* Block 1: General Info */}
+                        ) : (
+                            <>
+                                {/* General Info Section */}
+                                {generalSubmissions.length > 0 && (
+                                    <div className="mb-6">
+                                        <div className="bg-white dark:bg-gray-gray700 rounded-lg shadow p-6">
                                     <div className="mb-6">
                                         <div className="flex items-center justify-between mb-4">
                                             <h3 className="text-lg font-semibold text-gray-gray800 dark:text-gray-gray100">General Info</h3>
                                             {(() => {
-                                                const approveEventInfo = epSubmission.fields?.['Approve Event Info'];
+                                                const approveEventInfo = selectedGeneralSubmission?.fields?.['Approve Event Info'];
                                                 const isApproved = approveEventInfo === true || approveEventInfo === 'true' || approveEventInfo === 1 || approveEventInfo === '1';
                                                 return (
                                                     <span className={`px-4 py-1.5 rounded-full text-sm font-medium ${
@@ -530,67 +650,152 @@ export default function EventDetails({ fieldMappings }) {
                                                 );
                                             })()}
                                         </div>
-                                        <div className="bg-white dark:bg-gray-gray700 rounded-lg shadow p-6">
-                                            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        
+                                        {/* Submission dropdown and New Submission button */}
+                                        <div className="mb-4">
+                                            {renderSubmissionDropdown(
+                                                generalSubmissions,
+                                                selectedGeneralSubmissionId,
+                                                showGeneralDropdown,
+                                                setShowGeneralDropdown,
+                                                handleGeneralSubmissionChange
+                                            )}
+                                            {generalSubmissions.length > 0 && (
+                                                <div className="flex items-center gap-3 mt-2">
+                                                    {(() => {
+                                                        const selectedSubmission = generalSubmissions.find(s => s.id === selectedGeneralSubmissionId) || generalSubmissions[0];
+                                                        const submissionDate = selectedSubmission?.fields?.['Date'];
+                                                        const formattedDate = submissionDate ? formatDate(submissionDate) : 'No date';
+                                                        if (generalSubmissions.length === 1) {
+                                                            return (
+                                                                <span className="text-sm text-gray-gray600 dark:text-gray-gray400">
+                                                                    Submission {formattedDate}
+                                                                </span>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    })()}
+                                                    <button
+                                                        onClick={() => {
+                                                            setIsNewSubmission(true);
+                                                            setShowEPModal(true);
+                                                        }}
+                                                        className="px-3 py-1.5 text-sm bg-blue-blue text-white rounded-md hover:bg-opacity-90 transition-colors"
+                                                    >
+                                                        + New Submission
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
                                                 {/* Event Name - full width */}
                                                 <div className="sm:col-span-2">
                                                     <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Event Name</dt>
-                                                    <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{epSubmission.fields?.['Eventname'] || '—'}</dd>
+                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{selectedGeneralSubmission?.fields?.['Eventname'] || '—'}</dd>
                                                 </div>
                                                 
                                                 {/* Start - End on same row */}
                                                 <div>
-                                                    <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Start</dt>
-                                                    <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDate(epSubmission.fields?.['Doors open']) || '—'}</dd>
+                                                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                </svg>
+                                                                Start
+                                                            </dt>
+                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDate(selectedGeneralSubmission?.fields?.['Doors open']) || '—'}</dd>
                                                 </div>
                                                 <div>
-                                                    <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">End</dt>
-                                                    <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDate(epSubmission.fields?.['End']) || '—'}</dd>
+                                                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                </svg>
+                                                                End
+                                                            </dt>
+                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDate(selectedGeneralSubmission?.fields?.['End']) || '—'}</dd>
                                                 </div>
                                                 
                                                 {/* Proposed Announcement Date - Proposed Ticket on Sale Date on same row */}
                                                 <div>
-                                                    <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed Announcement Date</dt>
-                                                    <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDateOnly(epSubmission.fields?.['Announcement date']) || '—'}</dd>
+                                                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                                </svg>
+                                                                Proposed Announcement Date
+                                                            </dt>
+                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{formatDateOnly(selectedGeneralSubmission?.fields?.['Announcement date']) || '—'}</dd>
                                                 </div>
                                                 <div>
-                                                    <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed Ticket on Sale Date</dt>
+                                                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                                </svg>
+                                                                Proposed Ticket on Sale Date
+                                                            </dt>
                                                     <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">
-                                                        {formatDateOnly(epSubmission.fields?.['Tickets on sale']) || 
-                                                         formatDateOnly(epSubmission.fields?.['Tickets on Sale']) || 
-                                                         formatDateOnly(epSubmission.fields?.['Public ticket release']) ||
-                                                         formatDateOnly(epSubmission.fields?.['Public ticket release date']) ||
+                                                                {formatDateOnly(selectedGeneralSubmission?.fields?.['Tickets on sale']) || 
+                                                                 formatDateOnly(selectedGeneralSubmission?.fields?.['Tickets on Sale']) || 
+                                                                 formatDateOnly(selectedGeneralSubmission?.fields?.['Public ticket release']) ||
+                                                                 formatDateOnly(selectedGeneralSubmission?.fields?.['Public ticket release date']) ||
                                                          '—'}
                                                     </dd>
                                                 </div>
                                                 
                                                 {/* Location - Proposed line-up (and timetable) on same row */}
                                                 <div>
-                                                    <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Location</dt>
+                                                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                </svg>
+                                                                Location
+                                                            </dt>
                                                     <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">
-                                                        {renderLocationValue(epSubmission.fields?.['Location'])}
+                                                                {renderLocationValue(selectedGeneralSubmission?.fields?.['Location'])}
                                                     </dd>
                                                 </div>
                                                 <div>
-                                                    <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Proposed line-up (and timetable)</dt>
-                                                    <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 whitespace-pre-wrap">{epSubmission.fields?.['Proposed timetable'] || '—'}</dd>
+                                                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                                                                </svg>
+                                                                Proposed line-up (and timetable)
+                                                            </dt>
+                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 whitespace-pre-wrap">{selectedGeneralSubmission?.fields?.['Proposed timetable'] || '—'}</dd>
                                                 </div>
                                                 
                                                 {/* Comment - full width */}
                                                 <div className="sm:col-span-2">
-                                                    <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Comment</dt>
-                                                    <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 whitespace-pre-wrap">{epSubmission.fields?.['Comment'] || '—'}</dd>
+                                                            <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                                                </svg>
+                                                                Comment
+                                                            </dt>
+                                                            <dd className="text-sm text-gray-gray800 dark:text-gray-gray100 whitespace-pre-wrap">{selectedGeneralSubmission?.fields?.['Comment'] || '—'}</dd>
                                                 </div>
                                             </dl>
                                         </div>
                                     </div>
+                                )}
 
-                                    {/* Block 2: Load In/Out Times */}
+                                {/* Load In/Out Times Section */}
+                                <div>
+                                    {loadTimeSubmissions.length > 0 ? (
+                                            <>
+                                                {renderSubmissionDropdown(
+                                                    loadTimeSubmissions,
+                                                    selectedLoadTimeSubmissionId,
+                                                    showLoadTimeDropdown,
+                                                    setShowLoadTimeDropdown,
+                                                    handleLoadTimeSubmissionChange
+                                                )}
+                                                <div className="bg-white dark:bg-gray-gray700 rounded-lg shadow p-6">
                                     <div>
                                         <div className="flex items-center justify-between mb-4">
                                             <h3 className="text-lg font-semibold text-gray-gray800 dark:text-gray-gray100">Load In/Out Times</h3>
                                             {(() => {
-                                                const loadTimeApproval = epSubmission.fields?.['Load Time Approval'];
+                                                                const loadTimeApproval = selectedLoadTimeSubmission?.fields?.['Load Time Approval'];
                                                 // Handle different possible formats (boolean, string, number)
                                                 const isApproved = loadTimeApproval === true || loadTimeApproval === 'true' || loadTimeApproval === 1 || loadTimeApproval === '1';
                                                 // If it's a string value, display it; otherwise show Approved/Pending
@@ -610,8 +815,7 @@ export default function EventDetails({ fieldMappings }) {
                                                 ) : null;
                                             })()}
                                         </div>
-                                        <div className="bg-white dark:bg-gray-gray700 rounded-lg shadow p-6">
-                                            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
                                                 {(() => {
                                                     // Calculate load times from event record if submission fields are empty
                                                     const doorsOpenStr = event?.fields?.[fieldMappings.startDateField];
@@ -619,11 +823,19 @@ export default function EventDetails({ fieldMappings }) {
                                                     const doorsOpen = doorsOpenStr ? parseDate(doorsOpenStr) : null;
                                                     const end = endStr ? parseDate(endStr) : null;
 
-                                                    // Get submission field values
-                                                    const loadInStartSubmission = epSubmission.fields?.['Proposed production load in start'];
-                                                    const loadInEndSubmission = epSubmission.fields?.['Proposed production load in end'];
-                                                    const loadOutStartSubmission = epSubmission.fields?.['Proposed production load out start'];
-                                                    const loadOutEndSubmission = epSubmission.fields?.['Proposed production load out end'];
+                                                            // Get submission field values (original/proposed)
+                                                            const loadInStartSubmission = selectedLoadTimeSubmission?.fields?.['Proposed production load in start'];
+                                                            const loadInEndSubmission = selectedLoadTimeSubmission?.fields?.['Proposed production load in end'];
+                                                            const loadOutStartSubmission = selectedLoadTimeSubmission?.fields?.['Proposed production load out start'];
+                                                            const loadOutEndSubmission = selectedLoadTimeSubmission?.fields?.['Proposed production load out end'];
+
+                                                            // Get suggested values (Lofi fields)
+                                                            const loadTimeApproval = selectedLoadTimeSubmission?.fields?.['Load Time Approval'];
+                                                            const showSuggestions = loadTimeApproval === 'Rejected - Other Suggestion';
+                                                            const suggestedLoadInStart = selectedLoadTimeSubmission?.fields?.['Lofi production load in start'];
+                                                            const suggestedLoadInEnd = selectedLoadTimeSubmission?.fields?.['Lofi production load in end'];
+                                                            const suggestedLoadOutStart = selectedLoadTimeSubmission?.fields?.['Lofi production load out start'];
+                                                            const suggestedLoadOutEnd = selectedLoadTimeSubmission?.fields?.['Lofi production load out end'];
 
                                                     // Calculate from event if submission fields are empty
                                                     let loadInStart = loadInStartSubmission;
@@ -651,20 +863,100 @@ export default function EventDetails({ fieldMappings }) {
                                                     return (
                                                         <>
                                                             <div>
-                                                                <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Load In Start</dt>
-                                                                <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{loadInStart ? formatDate(loadInStart) : '—'}</dd>
+                                                                        <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                            </svg>
+                                                                            Load In Start
+                                                                        </dt>
+                                                                        <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">
+                                                                            {showSuggestions && suggestedLoadInStart ? (
+                                                                                <div className="space-y-1">
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="text-gray-gray600 dark:text-gray-gray400">Original:</span>
+                                                                                        <span>{loadInStart ? formatDate(loadInStart) : '—'}</span>
+                                                                                    </div>
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="text-blue-blue font-medium">Suggested:</span>
+                                                                                        <span className="text-blue-blue font-bold">{formatDate(suggestedLoadInStart)}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ) : (
+                                                                                loadInStart ? formatDate(loadInStart) : '—'
+                                                                            )}
+                                                                        </dd>
                                                             </div>
                                                             <div>
-                                                                <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Load In End</dt>
-                                                                <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{loadInEnd ? formatDate(loadInEnd) : '—'}</dd>
+                                                                        <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                            </svg>
+                                                                            Load In End
+                                                                        </dt>
+                                                                        <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">
+                                                                            {showSuggestions && suggestedLoadInEnd ? (
+                                                                                <div className="space-y-1">
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="text-gray-gray600 dark:text-gray-gray400">Original:</span>
+                                                                                        <span>{loadInEnd ? formatDate(loadInEnd) : '—'}</span>
+                                                                                    </div>
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="text-blue-blue font-medium">Suggested:</span>
+                                                                                        <span className="text-blue-blue font-bold">{formatDate(suggestedLoadInEnd)}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ) : (
+                                                                                loadInEnd ? formatDate(loadInEnd) : '—'
+                                                                            )}
+                                                                        </dd>
                                                             </div>
                                                             <div>
-                                                                <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Load Out Start</dt>
-                                                                <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{loadOutStart ? formatDate(loadOutStart) : '—'}</dd>
+                                                                        <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                            </svg>
+                                                                            Load Out Start
+                                                                        </dt>
+                                                                        <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">
+                                                                            {showSuggestions && suggestedLoadOutStart ? (
+                                                                                <div className="space-y-1">
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="text-gray-gray600 dark:text-gray-gray400">Original:</span>
+                                                                                        <span>{loadOutStart ? formatDate(loadOutStart) : '—'}</span>
+                                                                                    </div>
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="text-blue-blue font-medium">Suggested:</span>
+                                                                                        <span className="text-blue-blue font-bold">{formatDate(suggestedLoadOutStart)}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ) : (
+                                                                                loadOutStart ? formatDate(loadOutStart) : '—'
+                                                                            )}
+                                                                        </dd>
                                                             </div>
                                                             <div>
-                                                                <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1">Load Out End</dt>
-                                                                <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">{loadOutEnd ? formatDate(loadOutEnd) : '—'}</dd>
+                                                                        <dt className="text-xs uppercase text-gray-gray500 dark:text-gray-gray400 mb-1 flex items-center gap-1.5">
+                                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                            </svg>
+                                                                            Load Out End
+                                                                        </dt>
+                                                                        <dd className="text-sm text-gray-gray800 dark:text-gray-gray100">
+                                                                            {showSuggestions && suggestedLoadOutEnd ? (
+                                                                                <div className="space-y-1">
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="text-gray-gray600 dark:text-gray-gray400">Original:</span>
+                                                                                        <span>{loadOutEnd ? formatDate(loadOutEnd) : '—'}</span>
+                                                                                    </div>
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="text-blue-blue font-medium">Suggested:</span>
+                                                                                        <span className="text-blue-blue font-bold">{formatDate(suggestedLoadOutEnd)}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ) : (
+                                                                                loadOutEnd ? formatDate(loadOutEnd) : '—'
+                                                                            )}
+                                                                        </dd>
                                                             </div>
                                                         </>
                                                     );
@@ -673,19 +965,32 @@ export default function EventDetails({ fieldMappings }) {
                                         </div>
                                     </div>
                                 </>
-                            )}
+                            ) : (
+                                <div className="bg-white dark:bg-gray-gray700 rounded-lg shadow p-6">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="text-lg font-semibold text-gray-gray800 dark:text-gray-gray100">Load In/Out Times</h3>
                         </div>
+                                    <p className="text-sm text-gray-gray600 dark:text-gray-gray400">No need for Load times</p>
                     </div>
                 )}
             </div>
+                </>
+            )}
+        </div>
+    )}
 
             <EPSubmissionModal
                 open={showEPModal}
-                onClose={() => setShowEPModal(false)}
+                onClose={() => {
+                    setShowEPModal(false);
+                    setIsNewSubmission(false);
+                }}
                 event={event}
                 fieldMappings={fieldMappings}
                 onSuccess={handleEPSubmissionSuccess}
+                hideLoadTimes={isNewSubmission}
             />
+            </div>
         </div>
     );
 }

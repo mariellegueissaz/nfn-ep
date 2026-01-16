@@ -95,25 +95,30 @@ export default function ProfileModal({open, onClose, promoter, contacts = [], ma
                 ) : null}
                 {!loading && mappings && (
                     <>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <FieldRow label="Company Name" value={values[mappings?.companyNameField] || ''} editable={editable} onChange={(v) => setField(mappings?.companyNameField, v)} />
-                            <FieldRow label="Address" value={values[mappings?.addressField] || ''} editable={editable} onChange={(v) => setField(mappings?.addressField, v)} />
-                            <FieldRow label="Zipcode" value={values[mappings?.zipcodeField] || ''} editable={editable} onChange={(v) => setField(mappings?.zipcodeField, v)} />
-                            <FieldRow label="City" value={values[mappings?.cityField] || ''} editable={editable} onChange={(v) => setField(mappings?.cityField, v)} />
-                            <FieldRow label="COC" value={values[mappings?.cocField] || ''} editable={editable} onChange={(v) => setField(mappings?.cocField, v)} type="number" />
-                            <FieldRow label="VAT ID" value={values[mappings?.vatIdField] || ''} editable={editable} onChange={(v) => setField(mappings?.vatIdField, v)} />
-                            <FieldRow label="IBAN" value={values[mappings?.ibanField] || ''} editable={editable} onChange={(v) => setField(mappings?.ibanField, v)} />
-                            <FieldRow label="Website" value={values[mappings?.websiteField] || ''} editable={editable} onChange={(v) => setField(mappings?.websiteField, v)} type="url" />
-                        </div>
-                        <div className="mt-6 flex items-center justify-end gap-3">
-                            {!editable ? (
-                                <button type="button" onClick={() => setEditable(true)} className="px-4 py-2 bg-gray-gray200 dark:bg-gray-gray600 text-gray-gray800 dark:text-gray-gray100 rounded-md hover:bg-gray-gray300 dark:hover:bg-gray-gray500">Edit</button>
-                            ) : (
-                                <>
-                                    <button type="button" onClick={() => setEditable(false)} className="px-4 py-2 bg-gray-gray200 dark:bg-gray-gray600 text-gray-gray800 dark:text-gray-gray100 rounded-md hover:bg-gray-gray300 dark:hover:bg-gray-gray500">Cancel</button>
-                                    <button type="button" disabled={saving} onClick={() => onSave(values)} className="px-4 py-2 bg-blue-blue text-white rounded-md hover:bg-opacity-90 disabled:opacity-60">{saving ? 'Saving…' : 'Save'}</button>
-                                </>
-                            )}
+                        <div className="border border-gray-gray200 dark:border-gray-gray600 rounded-md p-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <div className="font-medium text-gray-gray800 dark:text-gray-gray100">Company Details</div>
+                                <div className="flex items-center gap-2">
+                                    {!editable ? (
+                                        <button type="button" onClick={() => setEditable(true)} className="px-3 py-1.5 bg-gray-gray200 dark:bg-gray-gray600 text-gray-gray800 dark:text-gray-gray100 rounded hover:bg-gray-gray300 dark:hover:bg-gray-gray500 text-sm">Edit</button>
+                                    ) : (
+                                        <>
+                                            <button type="button" onClick={() => setEditable(false)} className="px-3 py-1.5 bg-gray-gray200 dark:bg-gray-gray600 text-gray-gray800 dark:text-gray-gray100 rounded hover:bg-gray-gray300 dark:hover:bg-gray-gray500 text-sm">Cancel</button>
+                                            <button type="button" disabled={saving} onClick={() => onSave(values)} className="px-3 py-1.5 bg-blue-blue text-white rounded hover:bg-opacity-90 text-sm disabled:opacity-60">{saving ? 'Saving…' : 'Save'}</button>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <FieldRow label="Company Name" value={values[mappings?.companyNameField] || ''} editable={editable} onChange={(v) => setField(mappings?.companyNameField, v)} />
+                                <FieldRow label="Address" value={values[mappings?.addressField] || ''} editable={editable} onChange={(v) => setField(mappings?.addressField, v)} />
+                                <FieldRow label="Zipcode" value={values[mappings?.zipcodeField] || ''} editable={editable} onChange={(v) => setField(mappings?.zipcodeField, v)} />
+                                <FieldRow label="City" value={values[mappings?.cityField] || ''} editable={editable} onChange={(v) => setField(mappings?.cityField, v)} />
+                                <FieldRow label="COC" value={values[mappings?.cocField] || ''} editable={editable} onChange={(v) => setField(mappings?.cocField, v)} type="number" />
+                                <FieldRow label="VAT ID" value={values[mappings?.vatIdField] || ''} editable={editable} onChange={(v) => setField(mappings?.vatIdField, v)} />
+                                <FieldRow label="IBAN" value={values[mappings?.ibanField] || ''} editable={editable} onChange={(v) => setField(mappings?.ibanField, v)} />
+                                <FieldRow label="Website" value={values[mappings?.websiteField] || ''} editable={editable} onChange={(v) => setField(mappings?.websiteField, v)} type="url" />
+                            </div>
                         </div>
                     </>
                 )}
